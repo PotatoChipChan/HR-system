@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}My Performance{% endblock %}
+{% block page_title %}My Performance{% endblock %}
+
+{% block content %}
+<div class="card fade-in" style="margin-bottom:20px">
+  <div class="sec-title">
+    <span>{% if month %}Monthly Breakdown — {{ month }}/{% endif %}{{ year }}</span>
+    <div style="display:flex;gap:8px;align-items:center">
+      <form method="GET" action="{{ url_for('performance.list_scores') }}" style="display:flex;gap:8px;align-items:center">
+        <select class="form-input" name="month" style="width:130px">
+          <option value="" {{ 'selected' if not month }}>Yearly View</option>
+          {% for m in range(1,13) %}
+          <option value="{{ m }}" {{ 'selected' if m==month }}>Month {{ m }}</option>
+          {% endfor %}
+        </select>
+        <select class="form-input" name="year" style="width:90px">
+          {% for y in [2025,2026,2027] %}
+          <option value="{{ y }}" {{ 'selected' if y==year }}>{{ y }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-sm btn-primary" type="submit">View</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="info-box" style="background:var(--g50);border:1px solid var(--g200);border-radius:8px;padding:12px 16px;margin-bottom:16px;color:var(--text-secondary);font-size:13px">
+    <strong>How your yearly grade is calculated:</strong><br>
+    Composite = Attendance Rate × 40% + Punctuality × 30% + Overtime Score × 15% + Reliability × 15%<br>
+    Grades: A ≥ 85, B 70–84, C 55–69, D &lt; 55
+  </div>
+
+  {% if reviews %}
+    {% for s in reviews %}
+    <div class="metric-grid" style="margin-bottom:20px">
+      <div class="metric-card" style="background:var(--g50);border:2px solid var(--g300)">
+        <div class="metric-label">Yearly Overall Score</div>
+        <div class="metric-val" style="font-size:36px;color:{% if s.grade=='A' %}var(--success-color){% elif s.grade=='B' %}var(--info-color){% elif s.grade=='C' %}var(--warning-color){% else %}var(--danger-color){% endif %}">
+          {{ s.composite_score }}
+        </div>
+        <div class="metric-sub">Grade: <strong>{{ s.grade }}</strong></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Attendance Rate</div>
+        <div class="metric-val green-val">{{ s.attendance_rate }}%</div>
+        <div class="metric-sub">Days present / working days</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Punctuality</div>
+        <div class="metric-val green-val">{{ s.punctuality }}%</div>
+        <div class="metric-sub">On-time check-ins</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Reliability</div>
+        <div class="metric-val green-val">{{ s.reliability }}%</div>
+        <div class="metric-sub">Days with ≥6 hours</div>
+      </div>
+    </div>
+
+    <div style="margin-top:16px">
+      <h4>Score Breakdown</h4>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
+        <div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Attendance (40%)</span><span>{{ s.attendance_rate }}%</span></div>
+          <div class="prog"><div class="prog-fill" style="width:{{ s.attendance_rate }}%"></div></div>
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Punctuality (30%)</span><span>{{ s.punctuality }}%</span></div>
+          <div class="prog"><div class="prog-fill" style="width:{{ s.punctuality }}%"></div></div>
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Overtime (15%)</span><span>{{ s.overtime_score }}%</span></div>
+          <div class="prog"><div class="prog-fill" style="width:{{ s.overtime_score }}%"></div></div>
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Reliability (15%)</span><span>{{ s.reliability }}%</span></div>
+          <div class="prog"><div class="prog-fill" style="width:{{ s.reliability }}%"></div></div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  {% elif scores %}
+    {% for s in scores %}
+    <div class="metric-grid" style="margin-bottom:20px">
+      <div class="metric-card" style="background:var(--g50);border:2px solid var(--g300)">
+        <div class="metric-label">Monthly Score</div>
+        <div class="metric-val" style="font-size:36px;color:{% if s.grade=='A' %}var(--success-color){% elif s.grade=='B' %}var(--info-color){% elif s.grade=='C' %}var(--warning-color){% else %}var(--danger-color){% endif %}">
+          {{ s.composite_score }}
+        </div>
+        <div class="metric-sub">Grade: <strong>{{ s.grade }}</strong></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Attendance Rate</div>
+        <div class="metric-val green-val">{{ s.attendance_rate }}%</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Punctuality</div>
+        <div class="metric-val green-val">{{ s.punctuality }}%</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Reliability</div>
+        <div class="metric-val green-val">{{ s.reliability }}%</div>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+  <div class="empty-state">
+    <div class="icon">📊</div>
+    <h3>No performance review yet</h3>
+    <p>Scores will be available once HR generates them for {{ year }}.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,37 @@
+CHANGES MADE (Jul 30, 2026)
+============================
+
+1. CROSS-MIDNIGHT CHECK-OUT FIX (face/routes.py)
+   - api_match_and_record: For check-out, falls back to yesterday's open 
+     check-in when today has none (after-midnight shifts)
+   - record_attendance: Same fallback logic for the recording function
+   - get_today_attendance: Includes open check-ins from yesterday so UI 
+     shows correct state after midnight
+
+2. "All Year" MONTH FILTER — Added to all month <select> dropdowns:
+   - templates/reports.html — dropdown + export links
+   - templates/payroll/list.html — dropdown + section title
+   - templates/performance/admin_list.html — dropdown + title + empty state
+   - templates/performance/employee_view.html — dropdown + empty state
+
+3. "All Year" BACKEND SUPPORT — Routes handle month=0:
+   - app/reports/routes.py — month_raw parsing; attendance, attendance_detail,
+     invoice, payroll queries skip strftime('%m',...) when month=0
+   - app/payroll/routes.py — month_raw parsing; main query, summary, and
+     employee queries skip pay_period_month filter when month=0
+   - app/performance/routes.py — month_raw parsing; list_scores() uses
+     add_period_filter() helper; summary query skips month filter when month=0
+
+4. TEMPLATE FIXES (from prior session):
+   - time_tracking.html: Fixed vars (this_week->stats, my_records->recent, 
+     team->employees)
+   - logs.html: Fixed summary->stats
+   - requests.html: Deleted
+
+5. ROUTE FIXES (from prior session):
+   - manual(): Removed employee dropdown, uses logged-in user, status='Pending',
+     duplicate check-in guard
+   - manual_self(): Handles check_out (finds open check-in, calc hours/OT)
+   - manual_pending_review(): Self-approval blocked
+   - Removed attendance_requests route
+   - _increment_failures(): Now runs for both check_in and check_out

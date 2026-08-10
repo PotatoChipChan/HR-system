@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Bonus Policy{% endblock %}
+{% block page_title %}Bonus Policy — {{ year }}{% endblock %}
+
+{% block content %}
+<div class="card fade-in">
+  <div class="sec-title">
+    <span>{{ year }} Bonus Policy Configuration</span>
+    <form method="GET" action="{{ url_for('bonus.bonus_policy') }}" style="display:flex;gap:8px;align-items:center">
+      <select class="form-input" name="year" style="width:100px" onchange="this.form.submit()">
+        {% for y in [2025,2026,2027] %}
+        <option value="{{ y }}" {{ 'selected' if y==year }}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+
+  <div class="info-box" style="background:var(--g50);border:1px solid var(--g200);border-radius:8px;padding:12px 16px;margin-bottom:20px;color:var(--text-secondary);font-size:13px">
+    <strong>How yearly bonus is calculated:</strong><br>
+    1. Employee must have a yearly Performance Review grade (A/B/C/D) and meet the minimum tenure.<br>
+    2. Full Bonus = Base Salary × Grade Months (A={{ policy.grade_A_months }} months, B={{ policy.grade_B_months }}, C={{ policy.grade_C_months }}, D={{ policy.grade_D_months }}).<br>
+    3. Prorated Bonus = Full Bonus × (Months Worked in {{ year }} / 12).<br>
+    4. Approved bonuses are paid in the configured Payout Month (default January for CNY).
+  </div>
+
+  <form method="POST">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px">
+      <div>
+        <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Grade A (months salary)</label>
+        <input type="number" step="0.1" name="grade_A_months" value="{{ policy.grade_A_months }}" class="form-input" required>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Grade B (months salary)</label>
+        <input type="number" step="0.1" name="grade_B_months" value="{{ policy.grade_B_months }}" class="form-input" required>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Grade C (months salary)</label>
+        <input type="number" step="0.1" name="grade_C_months" value="{{ policy.grade_C_months }}" class="form-input" required>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Grade D (months salary)</label>
+        <input type="number" step="0.1" name="grade_D_months" value="{{ policy.grade_D_months }}" class="form-input" required>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;align-items:end">
+      <div>
+        <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Minimum Tenure (months)</label>
+        <input type="number" name="tenure_threshold_months" value="{{ policy.tenure_threshold_months }}" class="form-input" required>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Payout Month</label>
+        <select name="payout_month" class="form-input">
+          {% for m in range(1,13) %}
+          <option value="{{ m }}" {{ 'selected' if m==policy.payout_month }}>{{ m }} — {{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" name="auto_propose" value="1" {{ 'checked' if policy.auto_propose else '' }}>
+          Auto-propose when opening Propose page
+        </label>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <a class="btn btn-secondary btn-sm" href="{{ url_for('bonus.list_bonuses', year=year) }}">Back to Bonus List</a>
+      <button type="submit" class="btn btn-primary btn-sm">Save Policy</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

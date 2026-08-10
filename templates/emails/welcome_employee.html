@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html><body style="font-family:Arial,sans-serif;color:#333;max-width:600px;margin:0 auto;padding:20px">
+<div style="border-bottom:3px solid #1f4e3d;padding-bottom:10px;margin-bottom:20px">
+<h2 style="color:#1f4e3d;margin:0">Welcome to SmartHR</h2>
+</div>
+<p>Dear <strong>{{ employee_name }}</strong>,</p>
+<p>Your employee account has been created. Here are your login credentials:</p>
+<table style="background:#f5f5f5;padding:16px;border-radius:8px;margin:16px 0">
+<tr><td style="padding:4px 12px;font-weight:600">System URL:</td><td style="padding:4px 12px"><a href="{{ url_for('auth.login', _external=True) }}">{{ url_for('auth.login', _external=True) }}</a></td></tr>
+<tr><td style="padding:4px 12px;font-weight:600">Email:</td><td style="padding:4px 12px">{{ email }}</td></tr>
+<tr><td style="padding:4px 12px;font-weight:600">Temporary Password:</td><td style="padding:4px 12px;font-family:monospace;background:#e8e8e8;padding:2px 6px;border-radius:4px">{{ password }}</td></tr>
+</table>
+<p style="color:#a32d2d;font-size:13px"><strong>Important:</strong> Please change your password after your first login.</p>
+<p>If you have any questions, please contact your HR department.</p>
+<p>Best regards,<br><strong>SmartHR Team</strong></p>
+</body></html>

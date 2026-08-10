@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% block title %}Salary Increments{% endblock %}
+{% block page_title %}Salary Increments – {{ year }}{% endblock %}
+
+{% block head %}
+<style>
+  .bulk-bar { display:none; position:fixed; bottom:0; left:0; right:0; background:var(--g600); color:#fff; padding:12px 24px; z-index:999; align-items:center; gap:16px; justify-content:center; }
+  .bulk-bar.show { display:flex; }
+  .bulk-bar .btn { padding:6px 18px; font-size:13px; border:none; border-radius:6px; cursor:pointer; }
+  #rejection-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:1000; align-items:center; justify-content:center; }
+  #rejection-modal.show { display:flex; }
+  #rejection-modal .modal-box { background:#fff; padding:24px; border-radius:12px; min-width:400px; max-width:500px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<form id="filter-form" method="GET" style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin-bottom:20px">
+  <div>
+    <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Year</label>
+    <select name="year" onchange="this.form.submit()" class="form-control" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px">
+      {% for y in [2025, 2026, 2027] %}
+      <option value="{{ y }}" {{ 'selected' if y==year }}>{{ y }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Branch</label>
+    <select name="branch_id" onchange="this.form.submit()" class="form-control" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px">
+      <option value="">All Branches</option>
+      {% for b in branches %}
+      <option value="{{ b.branch_id }}" {{ 'selected' if branch_f|string==b.branch_id|string }}>{{ b.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Department</label>
+    <select name="department_id" onchange="this.form.submit()" class="form-control" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px">
+      <option value="">All Departments</option>
+      {% for d in departments %}
+      <option value="{{ d.department_id }}" {{ 'selected' if dept_f|string==d.department_id|string }}>{{ d.department_name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Status</label>
+    <select name="status" onchange="this.form.submit()" class="form-control" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px">
+      <option value="">All Status</option>
+      {% for s in ['Pending','Approved','Rejected'] %}
+      <option value="{{ s }}" {{ 'selected' if status_f==s }}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Search</label>
+    <input type="text" name="search" value="{{ search }}" placeholder="Employee name..." class="form-control" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px" onchange="this.form.submit()">
+  </div>
+  <div style="display:flex;gap:8px;align-items:end">
+    <a class="btn btn-primary btn-sm" href="{{ url_for('increment.propose_increments', year=year) }}">+ Propose New</a>
+    <a class="btn btn-sm" href="{{ url_for('increment.policy') }}">⚙️ Policy Settings</a>
+  </div>
+</form>
+
+{% if policy %}
+<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:13px;color:var(--text-secondary)">
+  Policy: <b>{{ '%.1f'|format(policy.increment_pct) }}%</b> for all employees with
+  <b>{{ policy.tenure_threshold_years }}</b> year{{ '' if policy.tenure_threshold_years == 1 else 's' }} or more of service.
+</div>
+{% endif %}
+
+<form id="bulk-form" method="POST" action="{{ url_for('increment.bulk_action') }}">
+<input type="hidden" name="year" value="{{ year }}">
+<div class="card" style="padding:0;overflow-x:auto">
+<table class="tbl" style="margin:0">
+  <thead>
+    <tr>
+      <th style="width:40px"><input type="checkbox" id="select-all" onchange="toggleAll(this)"></th>
+      <th>Employee</th>
+      <th>Dept</th>
+      <th>Branch</th>
+      <th>Current Salary</th>
+      <th>Years Served</th>
+      <th>%</th>
+      <th>New Salary</th>
+      <th>Proposed By</th>
+      <th>Status</th>
+      <th style="width:120px">Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for inc in increments %}
+    <tr>
+      <td>
+        {% if inc.status == 'Pending' %}
+        <input type="checkbox" name="increment_ids" value="{{ inc.increment_id }}" class="inc-checkbox" onchange="updateBulkBar()">
+        {% endif %}
+      </td>
+      <td style="font-weight:600">{{ inc.full_name }}</td>
+      <td>{{ inc.department_name }}</td>
+      <td>{{ inc.branch_name }}</td>
+      <td>RM {{ '%.2f'|format(inc.old_salary) }}</td>
+      <td>{{ inc.years_served }}</td>
+      <td>{{ inc.increment_pct }}%</td>
+      <td style="font-weight:600;color:var(--g600)">RM {{ '%.2f'|format(inc.new_salary) }}</td>
+      <td>{{ inc.proposer_name or '—' }}</td>
+      <td>
+        {% if inc.status == 'Pending' %}
+        <span class="badge badge-amber">Pending</span>
+        {% elif inc.status == 'Approved' %}
+        <span class="badge badge-green">Approved</span>
+        {% elif inc.status == 'Rejected' %}
+        <span class="badge badge-grey">Rejected</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if inc.status == 'Pending' %}
+        <div style="display:flex;gap:6px">
+          <button type="button" class="btn btn-success btn-sm" style="padding:3px 10px;font-size:12px" onclick="approveSingle({{ inc.increment_id }})">Approve</button>
+          <button type="button" class="btn btn-danger btn-sm" style="padding:3px 10px;font-size:12px" onclick="showRejectModal({{ inc.increment_id }})">Reject</button>
+        </div>
+        {% elif inc.status == 'Rejected' and inc.rejection_reason %}
+        <span style="font-size:12px;color:var(--text-secondary)" title="{{ inc.rejection_reason }}">{{ inc.rejection_reason[:20] }}{% if inc.rejection_reason|length > 20 %}…{% endif %}</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-secondary)">No increments found for {{ year }}.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<div class="bulk-bar" id="bulk-bar">
+  <span id="bulk-count">0 selected</span>
+  <button type="submit" name="action" value="approve" class="btn" style="background:#16a34a;color:#fff">✓ Approve Selected</button>
+  <button type="button" class="btn" style="background:#dc2626;color:#fff" onclick="showBulkRejectModal()">✕ Reject Selected</button>
+</div>
+</form>
+
+<div id="rejection-modal">
+  <div class="modal-box">
+    <h3 style="margin:0 0 12px">Rejection Reason</h3>
+    <textarea id="modal-reason" rows="3" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;resize:vertical;margin-bottom:12px" placeholder="Enter reason for rejection..."></textarea>
+    <div style="display:flex;gap:8px;justify-content:end">
+      <button type="button" class="btn btn-secondary btn-sm" onclick="closeRejectModal()">Cancel</button>
+      <button type="button" class="btn btn-danger btn-sm" onclick="submitReject()">Reject</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let rejectIncId = null;
+let rejectMode = 'single';
+
+function approveSingle(id) {
+  const f = document.createElement('form');
+  f.method = 'POST';
+  f.action = '/increment/' + id + '/approve';
+  document.body.appendChild(f);
+  f.submit();
+} // 'single' or 'bulk'
+
+function toggleAll(el) {
+  document.querySelectorAll('.inc-checkbox').forEach(cb => cb.checked = el.checked);
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const checked = document.querySelectorAll('.inc-checkbox:checked');
+  const bar = document.getElementById('bulk-bar');
+  const count = document.getElementById('bulk-count');
+  count.textContent = checked.length + ' selected';
+  bar.classList.toggle('show', checked.length > 0);
+  document.getElementById('bulk-form').style.paddingBottom = checked.length > 0 ? '70px' : '0';
+}
+
+function showRejectModal(incId) {
+  rejectIncId = incId;
+  rejectMode = 'single';
+  document.getElementById('modal-reason').value = '';
+  document.getElementById('rejection-modal').classList.add('show');
+}
+
+function showBulkRejectModal() {
+  const ids = Array.from(document.querySelectorAll('.inc-checkbox:checked')).map(cb => cb.value);
+  if (ids.length === 0) return;
+  rejectIncId = ids;
+  rejectMode = 'bulk';
+  document.getElementById('modal-reason').value = '';
+  document.getElementById('rejection-modal').classList.add('show');
+}
+
+function closeRejectModal() {
+  document.getElementById('rejection-modal').classList.remove('show');
+}
+
+function submitReject() {
+  const reason = document.getElementById('modal-reason').value.trim() || 'No reason provided';
+  const modal = document.getElementById('rejection-modal');
+  modal.classList.remove('show');
+
+  if (rejectMode === 'single') {
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/increment/' + rejectIncId + '/reject';
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'rejection_reason';
+    input.value = reason;
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+  } else {
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/increment/bulk-action';
+    const actionInput = document.createElement('input');
+    actionInput.type = 'hidden';
+    actionInput.name = 'action';
+    actionInput.value = 'reject';
+    form.appendChild(actionInput);
+    const reasonInput = document.createElement('input');
+    reasonInput.type = 'hidden';
+    reasonInput.name = 'rejection_reason';
+    reasonInput.value = reason;
+    form.appendChild(reasonInput);
+    rejectIncId.forEach(function(id) {
+      const inp = document.createElement('input');
+      inp.type = 'hidden';
+      inp.name = 'increment_ids';
+      inp.value = id;
+      form.appendChild(inp);
+    });
+    document.body.appendChild(form);
+    form.submit();
+  }
+}
+</script>
+{% endblock %}

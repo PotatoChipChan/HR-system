@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block title %}Payroll{% endblock %}
+{% block page_title %}Payroll Management{% endblock %}
+
+{% block content %}
+{% if summary %}
+<div class="metric-grid">
+  <div class="metric-card"><div class="metric-label">Total Employees</div><div class="metric-val green-val">{{ summary.count or 0 }}</div></div>
+  <div class="metric-card"><div class="metric-label">Total Gross Pay</div><div class="metric-val green-val" style="font-size:18px">RM {{ '%.2f'|format(summary.total_gross or 0) }}</div></div>
+  <div class="metric-card"><div class="metric-label">Total Deductions</div><div class="metric-val" style="font-size:18px">RM {{ '%.2f'|format(summary.total_ded or 0) }}</div></div>
+  <div class="metric-card"><div class="metric-label">Total Net Pay</div><div class="metric-val green-val" style="font-size:18px">RM {{ '%.2f'|format(summary.total_net or 0) }}</div></div>
+</div>
+{% endif %}
+
+<div class="card fade-in">
+  <div class="sec-title" style="margin-bottom:12px;">
+    Payroll — {% if month %}{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][month] }} {% endif %}{{ year }}
+    
+    {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+    <div style="display:flex;gap:8px">
+      <a class="btn btn-sm" href="{{ url_for('payroll.bulk_download_pdf', month=month, year=year) }}">📦 Download All (ZIP)</a>
+      <form method="POST" action="{{ url_for('payroll.generate_payroll') }}" style="display:inline">
+        <input type="hidden" name="month" value="{{ month }}">
+        <input type="hidden" name="year" value="{{ year }}">
+        <button class="btn btn-primary btn-sm" type="submit" onclick="return confirm('Regenerate payroll for all active employees for this month?');">⚙️ Regenerate Now</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+
+  <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 14px;margin-bottom:16px;font-size:12px;color:#1e40af">
+    🔄 Draft payrolls are auto-refreshed daily with the latest attendance, bonuses, increments and
+    approved claims. Use “Regenerate Now” for an immediate manual refresh of this period.
+    Only Draft payrolls are regenerated; Finalised/Paid records are never touched.
+  </div>
+
+  <div class="filter-panel" style="background:#f9f9fb; padding:16px; border-radius:8px; margin-bottom:20px; border:1px solid #eef1f6;">
+    <form method="GET" id="filterForm" style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end;">
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:12px; color:var(--text-secondary); font-weight:500;">Period</label>
+        <div style="display:flex; gap:4px;">
+          <select name="month" class="form-input" style="width:100px" onchange="document.getElementById('filterForm').submit()">
+            <option value="" {% if not month %}selected{% endif %}>All Year</option>
+            {% for m in range(1,13) %}
+            <option value="{{ m }}" {% if m==month %}selected{% endif %}>{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m] }}</option>
+            {% endfor %}
+          </select>
+          <select name="year" class="form-input" style="width:90px" onchange="document.getElementById('filterForm').submit()">
+            {% for y in [2024,2025,2026] %}
+            <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      
+      {% if session.user_role in ['Admin','HR Director','HR Manager','HR','Manager'] %}
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:12px; color:var(--text-secondary); font-weight:500;">Employee Name</label>
+        <input type="text" name="name" class="form-input" placeholder="Search name..." value="{{ request.args.get('name', '') }}" onkeydown="if(event.key === 'Enter'){ document.getElementById('filterForm').submit(); }">
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:12px; color:var(--text-secondary); font-weight:500;">Branch</label>
+        <select name="branch" id="branchFilter" class="form-input" onchange="filterDepartments(); document.getElementById('filterForm').submit()">
+          <option value="">All Branches</option>
+          {% for b in branches %}
+          <option value="{{ b.branch_id }}" {% if request.args.get('branch')|string == b.branch_id|string %}selected{% endif %}>{{ b.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:12px; color:var(--text-secondary); font-weight:500;">Department</label>
+        <select name="dept" id="deptFilter" class="form-input" onchange="document.getElementById('filterForm').submit()">
+          <option value="">All Departments</option>
+          {% for d in departments %}
+          <option value="{{ d.department_id }}" data-branch="{{ d.branch_id }}" {% if request.args.get('dept')|string == d.department_id|string %}selected{% endif %}>{{ d.department_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:12px; color:var(--text-secondary); font-weight:500;">Pay Order</label>
+        <select name="pay" class="form-input" onchange="document.getElementById('filterForm').submit()">
+          <option value="">Default Order</option>
+          <option value="desc" {% if request.args.get('pay') == 'desc' %}selected{% endif %}>Highest to Lowest</option>
+          <option value="asc" {% if request.args.get('pay') == 'asc' %}selected{% endif %}>Lowest to Highest</option>
+        </select>
+      </div>
+      {% endif %}
+    </form>
+  </div>
+
+  {% if payrolls %}
+  <form method="POST" id="bulkActionForm" action="{{ url_for('payroll.bulk_finalise') }}">
+    <input type="hidden" name="month" value="{{ month }}">
+    <input type="hidden" name="year" value="{{ year }}">
+    
+    <div id="bulkActionBar" style="display:none; padding:12px 16px; background:#fff3e0; border:1px solid #ffb74d; border-radius:8px; margin-bottom:16px; align-items:center; gap:12px;">
+      <span id="selectedCount" style="font-weight:500; color:#e65100;">0 selected</span>
+      <button type="submit" class="btn btn-primary btn-sm" onclick="return confirm('Finalise selected payroll records?');">✅ Finalise Selected</button>
+      <button type="button" class="btn btn-sm" onclick="submitBulkPdf()">📄 Download PDF Selected</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearSelection()">Clear Selection</button>
+    </div>
+
+    <div style="overflow-x: auto;">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th style="width:40px;"><input type="checkbox" id="selectAll" title="Select All"></th>
+            <th>Employee</th>
+            <th>Base Salary</th>
+            <th>Gross Pay</th>
+            <th>EPF (Emp)</th>
+            <th>SOCSO</th>
+            <th>EIS</th>
+            <th>Tax (PCB)</th>
+            <th>Total Ded.</th>
+            <th>Net Pay</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in payrolls %}
+          <tr>
+            <td style="text-align:center;">
+              {% if p.status == 'Draft' %}
+              <input type="checkbox" name="payroll_ids" value="{{ p.payroll_id }}" class="rowCheckbox" data-pid="{{ p.payroll_id }}">
+              {% endif %}
+            </td>
+            <td>
+              <div style="font-weight:500">{{ p.full_name }}</div>
+              <div style="font-size:10px;color:var(--text-secondary)">{{ p.department_name }}</div>
+            </td>
+            <td style="font-size:12px">
+              {% set orig = p.base_salary - p.salary_increment %}
+              {% if p.salary_increment > 0 %}
+                <div>RM {{ '%.2f'|format(orig) }}</div>
+                <div style="color:var(--g600);font-size:10px">+ RM {{ '%.2f'|format(p.salary_increment) }} inc.</div>
+                <div style="font-weight:600">RM {{ '%.2f'|format(p.base_salary) }}</div>
+              {% else %}
+                <div style="font-weight:600">RM {{ '%.2f'|format(p.base_salary) }}</div>
+              {% endif %}
+            </td>
+            <td style="font-weight:500">RM {{ '%.2f'|format(p.gross_pay) }}</td>
+            <td style="color:#a32d2d">-{{ '%.2f'|format(p.epf_employee) }}</td>
+            <td style="color:#a32d2d">-{{ '%.2f'|format(p.socso_employee) }}</td>
+            <td style="color:#a32d2d">-{{ '%.2f'|format(p.eis_employee) }}</td>
+            <td style="color:#a32d2d">-{{ '%.2f'|format(p.pcb_tax or 0) }}</td>
+            <td style="font-weight:600;color:#a32d2d">RM {{ '%.2f'|format(p.total_deductions) }}</td>
+            <td style="font-weight:700;color:var(--g600)">RM {{ '%.2f'|format(p.net_pay) }}</td>
+            <td>
+              {% if p.status=='Finalised' %}<span class="badge badge-green">Finalised</span>
+              {% elif p.status=='Paid' %}<span class="badge badge-blue">Paid</span>
+              {% else %}<span class="badge badge-amber">Draft</span>{% endif %}
+            </td>
+            <td>
+              <div style="display:flex;gap:4px">
+                <a class="btn btn-sm" href="{{ url_for('payroll.view_payslip', pid=p.payroll_id) }}" title="View Online">View</a>
+                <a class="btn btn-sm" href="{{ url_for('payroll.download_pdf', pid=p.payroll_id) }}" title="Download PDF">Download</a>
+                {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] and p.status=='Draft' %}
+                <form method="POST" action="{{ url_for('payroll.finalise', pid=p.payroll_id) }}" style="display:inline">
+                  <button class="btn btn-sm btn-primary" type="submit" title="Finalise">Finalise</button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </form>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon">💰</div>
+    <h3>No payroll records</h3>
+    <p>No payroll generated for this period.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterDepartments() {
+  const branchSelect = document.getElementById('branchFilter');
+  const deptSelect = document.getElementById('deptFilter');
+  if(!branchSelect || !deptSelect) return;
+  
+  const selectedBranch = branchSelect.value;
+  const options = deptSelect.querySelectorAll('option');
+  
+  let validSelection = false;
+  
+  options.forEach(opt => {
+    if (opt.value === "") {
+      opt.style.display = ""; // Always show "All Departments"
+      if (opt.selected) validSelection = true;
+    } else {
+      if (!selectedBranch || opt.getAttribute('data-branch') === selectedBranch) {
+        opt.style.display = "";
+        if (opt.selected) validSelection = true;
+      } else {
+        opt.style.display = "none";
+      }
+    }
+  });
+  
+  // If the previously selected department is no longer visible, reset to "All Departments"
+  if (!validSelection && deptSelect.value !== "") {
+    deptSelect.value = "";
+  }
+}
+
+// Run once on load to set initial state without triggering form submit
+document.addEventListener('DOMContentLoaded', filterDepartments);
+
+// Bulk action handling
+document.addEventListener('DOMContentLoaded', function() {
+  const selectAll = document.getElementById('selectAll');
+  const rowCheckboxes = document.querySelectorAll('.rowCheckbox');
+  const bulkBar = document.getElementById('bulkActionBar');
+  const selectedCount = document.getElementById('selectedCount');
+  const bulkForm = document.getElementById('bulkActionForm');
+
+  if (!selectAll || rowCheckboxes.length === 0) return;
+
+  function updateBulkBar() {
+    const checked = document.querySelectorAll('.rowCheckbox:checked');
+    const count = checked.length;
+    if (count > 0) {
+      bulkBar.style.display = 'flex';
+      selectedCount.textContent = count + ' selected';
+    } else {
+      bulkBar.style.display = 'none';
+    }
+    selectAll.indeterminate = count > 0 && count < rowCheckboxes.length;
+    selectAll.checked = count === rowCheckboxes.length && count > 0;
+  }
+
+  selectAll.addEventListener('change', function() {
+    rowCheckboxes.forEach(cb => { cb.checked = selectAll.checked; });
+    updateBulkBar();
+  });
+
+  rowCheckboxes.forEach(cb => {
+    cb.addEventListener('change', updateBulkBar);
+  });
+
+  window.clearSelection = function() {
+    rowCheckboxes.forEach(cb => { cb.checked = false; });
+    selectAll.checked = false;
+    selectAll.indeterminate = false;
+    updateBulkBar();
+  };
+
+  window.submitBulkPdf = function() {
+    const checked = document.querySelectorAll('.rowCheckbox:checked');
+    if (checked.length === 0) return;
+    // Create a temporary form for PDF download
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '{{ url_for("payroll.bulk_pdf_selected") }}';
+    // Add month/year hidden inputs
+    const monthInput = document.createElement('input');
+    monthInput.type = 'hidden';
+    monthInput.name = 'month';
+    monthInput.value = '{{ month }}';
+    const yearInput = document.createElement('input');
+    yearInput.type = 'hidden';
+    yearInput.name = 'year';
+    yearInput.value = '{{ year }}';
+    form.appendChild(monthInput);
+    form.appendChild(yearInput);
+    checked.forEach(cb => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'payroll_ids';
+      input.value = cb.value;
+      form.appendChild(input);
+    });
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+  };
+});
+</script>
+{% endblock %}

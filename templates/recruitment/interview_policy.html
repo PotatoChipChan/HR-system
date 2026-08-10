@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Interview Policy{% endblock %}
+{% block page_title %}Interview Policy{% endblock %}
+
+{% block content %}
+<div class="card fade-in">
+  <div class="sec-title">
+    Interview Scheduling Policy
+  </div>
+
+  <div class="info-box" style="background:var(--g50);border:1px solid var(--g200);border-radius:8px;padding:12px 16px;margin-bottom:20px;color:var(--text-secondary);font-size:13px">
+    <strong>How auto-assignment works:</strong><br>
+    1. Days are only available <strong>{{ policy.day_start_time }} – {{ policy.day_end_time }}</strong>, with {{ policy.slot_gap_min }}min gaps between interviews.<br>
+    2. Max <strong>{{ policy.max_per_day }}</strong> interviews per day. Weekends are skipped.<br>
+    3. Interviewers on approved/pending leave are automatically excluded for that date.<br>
+    4. Candidates are assigned in order of application date (first-come, first-served).<br>
+    5. Interviewers are assigned round-robin among eligible Managers/HR staff in the branch.<br>
+    6. Use this on the <a href="{{ url_for('recruitment.list_applications', show='shortlisted') }}">Shortlisted Applications</a> page: select candidates → Auto-Assign.
+  </div>
+
+  <form method="POST">
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px">
+      <div>
+        <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Default Duration (min)</label>
+        <input type="number" name="default_duration_min" value="{{ policy.default_duration_min }}" min="15" step="5" class="form-input" required>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Default Interview Type</label>
+        <select name="default_type" class="form-input">
+          <option value="In-Person" {{ 'selected' if policy.default_type=='In-Person' }}>In-Person</option>
+          <option value="Online" {{ 'selected' if policy.default_type=='Online' }}>Online</option>
+          <option value="Phone" {{ 'selected' if policy.default_type=='Phone' }}>Phone</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Max Interviews Per Day</label>
+        <input type="number" name="max_per_day" value="{{ policy.max_per_day }}" min="1" max="20" class="form-input" required>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px">
+      <div>
+        <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Day Start Time</label>
+        <input type="time" name="day_start_time" value="{{ policy.day_start_time }}" class="form-input" required>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Day End Time</label>
+        <input type="time" name="day_end_time" value="{{ policy.day_end_time }}" class="form-input" required>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Slot Gap (min)</label>
+        <input type="number" name="slot_gap_min" value="{{ policy.slot_gap_min }}" min="0" max="120" step="5" class="form-input" required>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+      <div>
+        <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Default Location (for In-Person)</label>
+        <input type="text" name="default_location" value="{{ policy.default_location or '' }}" class="form-input" placeholder="Room name or address">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Default Meeting Link (for Online)</label>
+        <input type="text" name="default_meeting_link" value="{{ policy.default_meeting_link or '' }}" class="form-input" placeholder="https://">
+      </div>
+    </div>
+
+    <div style="margin-bottom:20px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" name="auto_notify" value="1" {{ 'checked' if policy.auto_notify else '' }}>
+        Auto-send interview invitation emails
+      </label>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <a class="btn btn-secondary btn-sm" href="{{ url_for('recruitment.list_applications', show='shortlisted') }}">Back to Applications</a>
+      <button type="submit" class="btn btn-primary btn-sm">Save Policy</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

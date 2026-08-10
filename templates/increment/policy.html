@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Increment Policy{% endblock %}
+{% block page_title %}Increment Policy Settings{% endblock %}
+
+{% block content %}
+<div class="card fade-in" style="max-width:720px">
+  <div class="sec-title" style="margin-bottom:16px;">Increment Policy</div>
+
+  <p style="color:var(--text-secondary);margin-bottom:20px;font-size:14px">
+    The increment policy applies the <b>same percentage</b> to every eligible employee
+    (annual inflation adjustment), instead of a performance-grade based range.
+    When you propose increments, all eligible employees are proposed with this percentage,
+    which you can still override per-employee before submitting.
+  </p>
+
+  <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 16px;margin-bottom:20px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:13px;color:var(--text-secondary)">Currently eligible employees</div>
+        <div style="font-size:24px;font-weight:700;color:var(--g600)">{{ active_count }}</div>
+      </div>
+      <div>
+        <div style="font-size:13px;color:var(--text-secondary)">Policy percentage</div>
+        <div style="font-size:24px;font-weight:700;color:var(--g600)">{{ '%.1f'|format(policy.increment_pct) }}%</div>
+      </div>
+      <div>
+        <div style="font-size:13px;color:var(--text-secondary)">Min. service</div>
+        <div style="font-size:24px;font-weight:700;color:var(--g600)">{{ policy.tenure_threshold_years }} yr{{ '' if policy.tenure_threshold_years == 1 else 's' }}</div>
+      </div>
+    </div>
+  </div>
+
+  <form method="POST">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label style="font-size:13px;font-weight:600">Increment % (same for all)</label>
+        <input type="number" name="increment_pct" class="form-input" step="0.1" min="0" max="100"
+               value="{{ '%.1f'|format(policy.increment_pct) }}" required>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label style="font-size:13px;font-weight:600">Min. service (years)</label>
+        <input type="number" name="tenure_threshold_years" class="form-input" step="1" min="0"
+               value="{{ policy.tenure_threshold_years }}" required>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label style="font-size:13px;font-weight:600">Effective month</label>
+        <select name="effective_month" class="form-input">
+          {% for m in range(1,13) %}
+          <option value="{{ m }}" {{ 'selected' if m == policy.effective_month }}>
+            {{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m] }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label style="font-size:13px;font-weight:600">Effective year</label>
+        <input type="number" name="effective_year" class="form-input" step="1" min="2024"
+               value="{{ policy.effective_year or '' }}" placeholder="Auto">
+      </div>
+    </div>
+
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:24px;cursor:pointer">
+      <input type="checkbox" name="auto_propose" value="1"
+             {{ 'checked' if policy.auto_propose }} style="width:16px;height:16px">
+      Auto-propose increments for eligible employees each year
+    </label>
+
+    <div style="display:flex;gap:8px">
+      <button type="submit" class="btn btn-primary">Save Policy</button>
+      <a class="btn btn-secondary" href="{{ url_for('increment.list_increments') }}">Back to Increments</a>
+      <a class="btn btn-sm" href="{{ url_for('increment.propose_increments') }}" style="margin-left:auto">+ Propose Increments</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,422 @@
+{% extends "base.html" %}
+
+{% block title %}Attendance Reports{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+<style>
+    .filter-panel {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+    
+    .table-responsive {
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    
+    .statistics-card {
+        border-left: 4px solid #007bff;
+        padding: 20px;
+        margin-bottom: 15px;
+        background: #f8f9fa;
+        border-radius: 4px;
+    }
+    
+    .statistics-card.success {
+        border-left-color: #28a745;
+    }
+    
+    .statistics-card.warning {
+        border-left-color: #ffc107;
+    }
+    
+    .statistics-card.danger {
+        border-left-color: #dc3545;
+    }
+    
+    .stat-value {
+        font-size: 2rem;
+        font-weight: bold;
+        color: #007bff;
+    }
+    
+    .stat-label {
+        color: #666;
+        font-size: 0.9rem;
+    }
+    
+    .badge {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.85rem;
+    }
+    
+    .btn-export {
+        margin: 5px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-5">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col">
+            <h2>📊 Attendance Report</h2>
+            <small class="text-muted">View and export attendance records with detailed statistics</small>
+        </div>
+        <div class="col-auto">
+            <button class="btn btn-success btn-sm" onclick="exportCSV()">
+                📥 Export CSV
+            </button>
+            <a href="{{ url_for('face.attendance_analytics') }}" class="btn btn-info btn-sm">
+                📈 View Analytics
+            </a>
+        </div>
+    </div>
+
+    <!-- Filter Panel -->
+    <div class="card shadow mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">🔍 Filters</h5>
+        </div>
+        <div class="card-body">
+            <!-- Quick Filters -->
+            <div class="row mb-3">
+                <div class="col">
+                    <label><strong>Quick Filters:</strong></label>
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="setQuickFilter('today')">
+                            📅 Today
+                        </button>
+                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="setQuickFilter('week')">
+                            📆 This Week
+                        </button>
+                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="setQuickFilter('month')">
+                            📊 This Month
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetDateFilters()">
+                            ✕ Clear
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Regular Filters -->
+            <div class="row">
+                <div class="col-md-2">
+                    <label><strong>From Date</strong></label>
+                    <input type="date" id="fromDate" class="form-control" onchange="applyFilters()">
+                </div>
+
+                <div class="col-md-2">
+                    <label><strong>To Date</strong></label>
+                    <input type="date" id="toDate" class="form-control" onchange="applyFilters()">
+                </div>
+
+                {% if show_all_employees %}
+                <div class="col-md-2">
+                    <label><strong>Employee</strong></label>
+                    <select id="employeeFilter" class="form-control" onchange="applyFilters()">
+                        <option value="">All Employees</option>
+                        {% for emp in employees %}
+                        <option value="{{ emp.employee_id }}">{{ emp.full_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+
+                <div class="col-md-2">
+                    <label><strong>Branch</strong></label>
+                    <select id="branchFilter" class="form-control" onchange="applyFilters()">
+                        <option value="">All Branches</option>
+                        {% for branch in branches %}
+                        <option value="{{ branch.branch_id }}">{{ branch.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-md-2">
+                    <label><strong>Department</strong></label>
+                    <select id="departmentFilter" class="form-control" onchange="applyFilters()">
+                        <option value="">All Departments</option>
+                        {% for dept in departments %}
+                        <option value="{{ dept.department_id }}">{{ dept.department_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-md-2">
+                    <label><strong>Status</strong></label>
+                    <select id="statusFilter" class="form-control" onchange="applyFilters()">
+                        <option value="">All Status</option>
+                        <option value="Approved">Approved</option>
+                        <option value="Pending">Pending</option>
+                        <option value="Flagged">Flagged</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="row mt-3">
+                <div class="col-auto">
+                    <label class="custom-control custom-checkbox">
+                        <input type="checkbox" class="custom-control-input" id="manualOnlyFilter" onchange="applyFilters()">
+                        <span class="custom-control-label">Manual Entries Only</span>
+                    </label>
+                </div>
+                <div class="col-auto">
+                    <button class="btn btn-primary btn-sm" onclick="resetFilters()">
+                        🔄 Reset Filters
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics Row -->
+    <div class="row mb-4" id="statisticsRow" style="display: none;">
+        <div class="col-md-3">
+            <div class="statistics-card">
+                <div class="stat-label">Total Records</div>
+                <div class="stat-value" id="statTotal">0</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="statistics-card success">
+                <div class="stat-label">Total Hours</div>
+                <div class="stat-value" id="statHours">0h</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="statistics-card warning">
+                <div class="stat-label">Days Present</div>
+                <div class="stat-value" id="statDays">0</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="statistics-card success">
+                <div class="stat-label">Avg Hours/Day</div>
+                <div class="stat-value" id="statAvg">0h</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Records Table -->
+    <div class="card shadow">
+        <div class="card-header bg-secondary text-white">
+            <h5 class="mb-0">📋 Attendance Records</h5>
+        </div>
+        <div class="card-body p-0">
+            <div id="loadingIndicator" class="text-center p-3">
+                <div class="spinner-border" role="status">
+                    <span class="sr-only">Loading...</span>
+                </div>
+            </div>
+            
+            <div class="table-responsive" id="tableContainer" style="display: none;">
+                <table class="table table-striped table-hover mb-0" id="attendanceTable">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Employee</th>
+                            <th>Position</th>
+                            <th>Branch</th>
+                            <th>Department</th>
+                            <th>Date</th>
+                            <th>Check In</th>
+                            <th>Check Out</th>
+                            <th>Hours</th>
+                            <th>OT</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="noRecords" class="alert alert-info m-3" style="display: none;">
+                <i class="fas fa-info-circle"></i> No records found matching the selected filters.
+            </div>
+        </div>
+        <div class="card-footer bg-light">
+            <small class="text-muted" id="recordCount">0 records</small>
+        </div>
+    </div>
+
+    <!-- Back Button -->
+    <div class="mt-3">
+        <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary">
+            ← Back to Dashboard
+        </a>
+    </div>
+</div>
+
+<script>
+// Set default date range (last 30 days)
+document.addEventListener('DOMContentLoaded', function() {
+    const today = new Date();
+    const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+    
+    document.getElementById('toDate').valueAsDate = today;
+    document.getElementById('fromDate').valueAsDate = thirtyDaysAgo;
+    
+    applyFilters();
+});
+
+function applyFilters() {
+    const fromDate = document.getElementById('fromDate').value;
+    const toDate = document.getElementById('toDate').value;
+    const employeeId = document.getElementById('employeeFilter')?.value || '';
+    const branchId = document.getElementById('branchFilter').value;
+    const departmentId = document.getElementById('departmentFilter').value;
+    const status = document.getElementById('statusFilter').value;
+    const manualOnly = document.getElementById('manualOnlyFilter').checked;
+    
+    // Build query string
+    let params = new URLSearchParams();
+    if (fromDate) params.append('from_date', fromDate);
+    if (toDate) params.append('to_date', toDate);
+    if (employeeId) params.append('employee_id', employeeId);
+    if (branchId) params.append('branch_id', branchId);
+    if (departmentId) params.append('department_id', departmentId);
+    if (status) params.append('status', status);
+    if (manualOnly) params.append('manual_only', 'true');
+    
+    // Show loading
+    document.getElementById('loadingIndicator').style.display = 'block';
+    document.getElementById('tableContainer').style.display = 'none';
+    document.getElementById('noRecords').style.display = 'none';
+    
+    // Fetch data
+    fetch(`/face/api/report_data?${params}`)
+        .then(resp => resp.json())
+        .then(data => {
+            if (data.success) {
+                displayRecords(data.records, data.statistics);
+            } else {
+                alert('Error: ' + data.msg);
+            }
+            document.getElementById('loadingIndicator').style.display = 'none';
+        })
+        .catch(err => {
+            console.error('Error:', err);
+            document.getElementById('loadingIndicator').style.display = 'none';
+        });
+}
+
+function displayRecords(records, stats) {
+    const tbody = document.getElementById('tableBody');
+    tbody.innerHTML = '';
+    
+    if (records.length === 0) {
+        document.getElementById('noRecords').style.display = 'block';
+        document.getElementById('tableContainer').style.display = 'none';
+        document.getElementById('statisticsRow').style.display = 'none';
+        document.getElementById('recordCount').textContent = '0 records';
+        return;
+    }
+    
+    // Display statistics
+    document.getElementById('statTotal').textContent = stats.total_records;
+    document.getElementById('statHours').textContent = stats.total_hours + 'h';
+    document.getElementById('statDays').textContent = stats.days_present || 0;
+    document.getElementById('statAvg').textContent = stats.avg_hours_per_day + 'h';
+    document.getElementById('statisticsRow').style.display = 'flex';
+    
+    // Populate table
+    records.forEach(rec => {
+        const checkInDate = new Date(rec.check_in);
+        const checkOutDate = rec.check_out ? new Date(rec.check_out) : null;
+        
+        const row = `
+            <tr>
+                <td><strong>${rec.full_name}</strong></td>
+                <td>${rec.position}</td>
+                <td>${rec.branch_name}</td>
+                <td>${rec.department_name}</td>
+                <td>${rec.check_in.split(' ')[0]}</td>
+                <td>${rec.check_in.split(' ')[1]?.substring(0, 5) || '-'}</td>
+                <td>${rec.check_out ? rec.check_out.split(' ')[1]?.substring(0, 5) : '-'}</td>
+                <td>${rec.hours_worked || '-'}</td>
+                <td>${rec.overtime_hours ? rec.overtime_hours + 'h' : '-'}</td>
+                <td>
+                    <span class="badge badge-${rec.status === 'Approved' ? 'success' : rec.status === 'Pending' ? 'warning' : 'secondary'}">
+                        ${rec.status}
+                    </span>
+                    ${rec.manual ? '<span class="badge badge-info">Manual</span>' : ''}
+                </td>
+            </tr>
+        `;
+        tbody.innerHTML += row;
+    });
+    
+    document.getElementById('tableContainer').style.display = 'block';
+    document.getElementById('recordCount').textContent = records.length + ' records';
+}
+
+function resetFilters() {
+    resetDateFilters();
+    if (document.getElementById('employeeFilter')) {
+        document.getElementById('employeeFilter').value = '';
+    }
+    document.getElementById('branchFilter').value = '';
+    document.getElementById('departmentFilter').value = '';
+    document.getElementById('statusFilter').value = '';
+    document.getElementById('manualOnlyFilter').checked = false;
+    
+    applyFilters();
+}
+
+function setQuickFilter(range) {
+    const today = new Date();
+    let fromDate = new Date();
+    
+    switch(range) {
+        case 'today':
+            fromDate = new Date(today);
+            break;
+        case 'week':
+            fromDate = new Date(today);
+            fromDate.setDate(today.getDate() - today.getDay());  // Start of week
+            break;
+        case 'month':
+            fromDate = new Date(today.getFullYear(), today.getMonth(), 1);
+            break;
+    }
+    
+    // Format dates as YYYY-MM-DD
+    const formatDate = (d) => d.toISOString().split('T')[0];
+    
+    document.getElementById('fromDate').value = formatDate(fromDate);
+    document.getElementById('toDate').value = formatDate(today);
+    
+    applyFilters();
+}
+
+function resetDateFilters() {
+    document.getElementById('fromDate').value = '';
+    document.getElementById('toDate').value = '';
+}
+
+function exportCSV() {
+    const fromDate = document.getElementById('fromDate').value;
+    const toDate = document.getElementById('toDate').value;
+    const employeeId = document.getElementById('employeeFilter')?.value || '';
+    const branchId = document.getElementById('branchFilter').value;
+    const departmentId = document.getElementById('departmentFilter').value;
+    const status = document.getElementById('statusFilter').value;
+    
+    let url = '/face/export/csv?';
+    if (fromDate) url += 'from_date=' + fromDate + '&';
+    if (toDate) url += 'to_date=' + toDate + '&';
+    if (employeeId) url += 'employee_id=' + employeeId + '&';
+    if (branchId) url += 'branch_id=' + branchId + '&';
+    if (departmentId) url += 'department_id=' + departmentId + '&';
+    if (status) url += 'status=' + status;
+    
+    window.location.href = url;
+}
+</script>
+{% endblock %}

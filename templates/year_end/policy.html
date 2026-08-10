@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Compensation Policy{% endblock %}
+{% block page_title %}Compensation Policy — {{ year }}{% endblock %}
+
+{% block content %}
+<form method="POST">
+<input type="hidden" name="year" value="{{ year }}">
+
+<div class="card fade-in" style="margin-bottom:24px">
+  <div class="sec-title" style="display:flex;justify-content:space-between">
+    <span>Increment Policy</span>
+    <a class="btn btn-secondary btn-sm" href="{{ url_for('year_end.review', year=year, tab='increment') }}">Back to Year-End Review</a>
+  </div>
+
+  <div class="info-box" style="background:var(--g50);border:1px solid var(--g200);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--text-secondary);font-size:13px">
+    <strong>How increments are calculated:</strong><br>
+    Eligible employees (service years ≥ tenure threshold) receive a fixed <strong>{{ '%.1f'|format(inc_policy.increment_pct) }}%</strong> increment on their base salary each year.
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;align-items:end">
+    <div>
+      <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Increment %</label>
+      <input type="number" step="0.1" name="inc_pct" value="{{ inc_policy.increment_pct }}" class="form-input" required>
+    </div>
+    <div>
+      <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Tenure Threshold (years)</label>
+      <input type="number" name="inc_tenure" value="{{ inc_policy.tenure_threshold_years }}" class="form-input" required>
+    </div>
+    <div>
+      <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Effective Month</label>
+      <select name="inc_eff_month" class="form-input">
+        {% for m in range(1,13) %}
+        <option value="{{ m }}" {{ 'selected' if m==inc_policy.effective_month }}>{{ m }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" name="inc_auto" value="1" {{ 'checked' if inc_policy.auto_propose else '' }}>
+        Auto-propose on Year-End Review page
+      </label>
+    </div>
+  </div>
+</div>
+
+<div class="card fade-in">
+  <div class="sec-title">
+    <span>Bonus Policy</span>
+    <form method="GET" action="{{ url_for('year_end.policy') }}" style="display:flex;gap:8px">
+      <select name="year" class="form-input" style="width:90px" onchange="this.form.submit()">
+        {% for y in [2024,2025,2026,2027] %}
+        <option value="{{ y }}" {{ 'selected' if y==year }}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+
+  <div class="info-box" style="background:var(--g50);border:1px solid var(--g200);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--text-secondary);font-size:13px">
+    <strong>How yearly bonuses are calculated:</strong><br>
+    1. Employee must have a yearly Performance Review grade (A/B/C/D) and meet the minimum tenure.<br>
+    2. Full Bonus = Base Salary × Grade Months.<br>
+    3. Prorated Bonus = Full Bonus × (Months Worked in {{ year }} / 12).<br>
+    4. Approved bonuses are paid in the configured Payout Month.
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px">
+    <div>
+      <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Grade A (months salary)</label>
+      <input type="number" step="0.1" name="grade_A_months" value="{{ bonus_policy.grade_A_months }}" class="form-input" required>
+    </div>
+    <div>
+      <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Grade B (months salary)</label>
+      <input type="number" step="0.1" name="grade_B_months" value="{{ bonus_policy.grade_B_months }}" class="form-input" required>
+    </div>
+    <div>
+      <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Grade C (months salary)</label>
+      <input type="number" step="0.1" name="grade_C_months" value="{{ bonus_policy.grade_C_months }}" class="form-input" required>
+    </div>
+    <div>
+      <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Grade D (months salary)</label>
+      <input type="number" step="0.1" name="grade_D_months" value="{{ bonus_policy.grade_D_months }}" class="form-input" required>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:16px;align-items:end">
+    <div>
+      <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Min Tenure (months)</label>
+      <input type="number" name="bonus_tenure" value="{{ bonus_policy.tenure_threshold_months }}" class="form-input" required>
+    </div>
+    <div>
+      <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Payout Month</label>
+      <select name="payout_month" class="form-input">
+        {% for m in range(1,13) %}
+        <option value="{{ m }}" {{ 'selected' if m==bonus_policy.payout_month }}>{{ m }} — {{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" name="bonus_auto" value="1" {{ 'checked' if bonus_policy.auto_propose else '' }}>
+        Auto-propose on Year-End Review page
+      </label>
+    </div>
+  </div>
+</div>
+
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
+  <a class="btn btn-secondary btn-sm" href="{{ url_for('year_end.review', year=year) }}">Back to Year-End Review</a>
+  <button type="submit" class="btn btn-primary btn-sm">Save All Policies</button>
+</div>
+</form>
+{% endblock %}

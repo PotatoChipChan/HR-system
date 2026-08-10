@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Leave Approvals{% endblock %}
+{% block page_title %}Leave Approvals{% endblock %}
+
+{% block content %}
+<div class="tabs">
+  <div class="tab active" onclick="showTab('pending',this,'leave-tabs')">Pending ({{ pending|length }})</div>
+  <div class="tab" onclick="showTab('history',this,'leave-tabs')">History</div>
+</div>
+
+<!-- PENDING -->
+<div id="tab-pending" class="fade-in">
+  {% if pending %}
+    {% for la in pending %}
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
+        <div>
+          <div style="font-weight:600;font-size:15px">{{ la.full_name }} · <span style="color:var(--g600)">{{ la.type_name }}</span></div>
+          <div class="text-muted" style="margin-top:4px">{{ la.department_name }} · Applied {{ la.applied_at[:10] }}</div>
+          <div style="margin-top:8px">
+            <strong>{{ la.start_date }}</strong> → <strong>{{ la.end_date }}</strong>
+            <span class="badge badge-blue" style="margin-left:8px">{{ la.total_days|int }} day(s)</span>
+          </div>
+          {% if la.reason %}
+          <div class="text-muted" style="margin-top:6px">Reason: {{ la.reason }}</div>
+          {% endif %}
+          {% if la.supporting_doc %}
+          <div style="margin-top:8px">
+            <a href="{{ url_for('leave.download_attachment', lid=la.leave_id) }}" target="_blank" class="btn btn-sm">📎 View Attachment</a>
+          </div>
+          {% endif %}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;min-width:200px">
+          <form method="POST" action="{{ url_for('leave.approve', lid=la.leave_id) }}">
+            <button class="btn btn-primary" type="submit" style="width:100%">✅ Approve</button>
+          </form>
+          <form method="POST" action="{{ url_for('leave.reject', lid=la.leave_id) }}"
+                onsubmit="return confirm('Reject this leave request?')">
+            <input class="form-input" name="comment" placeholder="Rejection reason (optional)" style="margin-bottom:6px">
+            <button class="btn btn-danger" type="submit" style="width:100%">❌ Reject</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+  <div class="empty-state"><div class="icon">✅</div><h3>No pending requests</h3><p>All leave applications have been reviewed.</p></div>
+  {% endif %}
+</div>
+
+<!-- HISTORY -->
+<div id="tab-history" class="fade-in" style="display:none">
+  {% if history %}
+  <div class="card">
+    <table class="tbl">
+      <thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th>Status</th><th>Reviewed By</th><th>Comment</th><th>File</th></tr></thead>
+      <tbody>
+        {% for la in history %}
+        <tr>
+          <td>{{ la.full_name }}</td>
+          <td>{{ la.type_name }}</td>
+          <td>{{ la.start_date }} → {{ la.end_date }}</td>
+          <td>{{ la.total_days|int }}</td>
+          <td>
+            {% if la.status=='Approved' %}<span class="badge badge-green">Approved</span>
+            {% elif la.status=='Rejected' %}<span class="badge badge-red">Rejected</span>
+            {% elif la.status=='Cancelled' %}<span class="badge badge-gray">Cancelled</span>
+            {% else %}<span class="badge badge-amber">{{ la.status }}</span>{% endif %}
+          </td>
+          <td>{{ la.reviewer_name or '—' }}</td>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">{{ la.review_comment or '—' }}</td>
+          <td>{% if la.supporting_doc %}<a href="{{ url_for('leave.download_attachment', lid=la.leave_id) }}" target="_blank">📎</a>{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state"><div class="icon">📋</div><p>No history yet</p></div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showTab(id, el, group){
+  document.getElementById('tab-pending').style.display='none';
+  document.getElementById('tab-history').style.display='none';
+  document.getElementById('tab-'+id).style.display='block';
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+}
+</script>
+{% endblock %}

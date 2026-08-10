@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Payslip{% endblock %}
+{% block page_title %}Payslip{% endblock %}
+{% block content %}
+<div style="max-width:700px;margin:0 auto">
+<div class="card fade-in" style="padding:0;overflow:hidden">
+  <div class="payslip-header">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div style="font-family:'Space Grotesk',sans-serif;font-size:22px;font-weight:700">SmartHR</div>
+        <div style="font-size:12px;opacity:.7;margin-top:4px">{{ p.company_name }}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:600">PAYSLIP</div>
+        <div style="font-size:12px;opacity:.7;margin-top:4px">
+          {{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][p.pay_period_month] }} {{ p.pay_period_year }}
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:20px;padding-top:20px;border-top:1px solid rgba(255,255,255,.2);display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div><div style="font-size:10px;opacity:.6;text-transform:uppercase;letter-spacing:.06em">Employee</div><div style="font-weight:600;margin-top:4px">{{ p.full_name }}</div></div>
+      <div><div style="font-size:10px;opacity:.6;text-transform:uppercase;letter-spacing:.06em">Department</div><div style="font-weight:600;margin-top:4px">{{ p.department_name }}</div></div>
+      <div><div style="font-size:10px;opacity:.6;text-transform:uppercase;letter-spacing:.06em">Position</div><div style="font-weight:600;margin-top:4px">{{ p.position or '—' }}</div></div>
+      <div><div style="font-size:10px;opacity:.6;text-transform:uppercase;letter-spacing:.06em">IC Number</div><div style="font-weight:600;margin-top:4px">{{ p.ic_number or '—' }}</div></div>
+    </div>
+  </div>
+
+  <div>
+    <div style="padding:16px 20px;font-size:12px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border)">Earnings</div>
+    {% set orig = p.base_salary - p.salary_increment %}
+    {% if p.salary_increment > 0 %}
+    <div class="payslip-row"><span>Basic Salary (Original)</span><span>RM {{ '%.2f'|format(orig) }}</span></div>
+    <div class="payslip-row" style="color:var(--g600)"><span>Salary Increment</span><span>+ RM {{ '%.2f'|format(p.salary_increment) }}</span></div>
+    <div class="payslip-row" style="font-weight:600"><span>Basic Salary (Effective)</span><span>RM {{ '%.2f'|format(p.base_salary) }}</span></div>
+    {% else %}
+    <div class="payslip-row"><span>Basic Salary</span><span>RM {{ '%.2f'|format(p.base_salary) }}</span></div>
+    {% endif %}
+    <div class="payslip-row"><span>Overtime Pay</span><span>RM {{ '%.2f'|format(p.overtime_pay) }}</span></div>
+    <div class="payslip-row"><span>Bonus</span><span>RM {{ '%.2f'|format(p.bonus) }}</span></div>
+    <div class="payslip-row"><span>Invoice Claims (Reimbursements)</span><span>RM {{ '%.2f'|format(p.invoice_claims) }}</span></div>
+    <div class="payslip-row" style="font-weight:700;background:var(--g50)"><span>Gross Pay</span><span style="color:var(--g600)">RM {{ '%.2f'|format(p.gross_pay) }}</span></div>
+
+    <div style="padding:16px 20px;font-size:12px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border)">Deductions</div>
+    <div class="payslip-row"><span>EPF (Employee 11%)</span><span>RM {{ '%.2f'|format(p.epf_employee) }}</span></div>
+    <div class="payslip-row"><span>SOCSO (Employee 0.5%)</span><span>RM {{ '%.2f'|format(p.socso_employee) }}</span></div>
+    <div class="payslip-row"><span>EIS (Employee 0.2%)</span><span>RM {{ '%.2f'|format(p.eis_employee) }}</span></div>
+    <div class="payslip-row"><span>PCB (Income Tax)</span><span>RM {{ '%.2f'|format(p.pcb_tax) }}</span></div>
+    <div class="payslip-row"><span>Leave Adjustment</span><span>RM {{ '%.2f'|format(p.leave_adjustment) }}</span></div>
+    <div class="payslip-row" style="font-weight:700;background:#fcebeb"><span>Total Deductions</span><span style="color:#a32d2d">RM {{ '%.2f'|format(p.total_deductions) }}</span></div>
+
+    <div style="padding:16px 20px;font-size:12px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border)">Employer Contributions</div>
+    <div class="payslip-row"><span>EPF Employer (13%)</span><span>RM {{ '%.2f'|format(p.epf_employer) }}</span></div>
+    <div class="payslip-row"><span>SOCSO Employer (1.75%)</span><span>RM {{ '%.2f'|format(p.socso_employer) }}</span></div>
+    <div class="payslip-row"><span>EIS Employer (0.2%)</span><span>RM {{ '%.2f'|format(p.eis_employer) }}</span></div>
+
+    <div class="payslip-row payslip-total" style="font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700;padding:20px">
+      <span>NET PAY</span>
+      <span style="color:var(--g600)">RM {{ '%.2f'|format(p.net_pay) }}</span>
+    </div>
+  </div>
+
+  <div style="padding:16px 20px;background:var(--bg-secondary);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <div style="font-size:11px;color:var(--text-secondary)">
+      Status: <strong>{{ p.status }}</strong> · Generated {{ p.generated_at[:10] }}
+    </div>
+    <div style="display:flex;gap:8px">
+      <a class="btn btn-sm btn-primary" href="{{ url_for('payroll.download_pdf', pid=p.payroll_id) }}">⬇️ Download PDF</a>
+      <button class="btn btn-sm" onclick="window.print()">🖨️ Print</button>
+    </div>
+  </div>
+</div>
+<div class="btn-row" style="margin-top:16px">
+  <a class="btn" href="{{ url_for('payroll.list_payroll') }}">← Back to Payroll</a>
+</div>
+</div>
+{% endblock %}

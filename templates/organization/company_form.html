@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Add Company' if not company else 'Edit Company' }} | SmartHR{% endblock %}
+
+{% block page_title %}{{ 'Add Company' if not company else 'Edit Company' }}{% endblock %}
+
+{% block content %}
+
+<div class="card shadow-sm" style="border: none;">
+  <div class="card-body p-5">
+    <form method="post" enctype="multipart/form-data" action="
+      {%- if company %}
+        {{ url_for('organization.edit_company', cid=company.company_id) }}
+      {%- else %}
+        {{ url_for('organization.add_company') }}
+      {%- endif %}
+    " novalidate id="companyForm">
+
+      <!-- Section 1: Company Information -->
+      <div class="mb-5">
+        <h5 class="mb-4 fw-bold">Company Information</h5>
+        
+        <div class="row g-4">
+          <!-- Company Name -->
+          <div class="col-12">
+            <label for="name" class="form-label fw-500">Company Name <span class="text-danger fw-bold">*</span></label>
+            <input type="text" class="form-control form-control-lg" id="name" name="name"
+                   value="{{ company.name if company else '' }}"
+                   placeholder="e.g. Maju Teknologi Sdn Bhd"
+                   required
+                   minlength="2"
+                   maxlength="150">
+            <div class="invalid-feedback d-block text-danger">Company name is required (2–150 characters).</div>
+          </div>
+
+          <!-- Email Address -->
+          <div class="col-12">
+            <label for="email" class="form-label fw-500">Email Address <span class="text-danger fw-bold">*</span></label>
+            <input type="email" class="form-control form-control-lg" id="email" name="email"
+                   value="{{ company.email if company else '' }}"
+                   placeholder="info@company.com"
+                   maxlength="100"
+                   required>
+            <div class="invalid-feedback d-block text-danger">Please enter a valid email address.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 2: Company Signature (Admin/HR Manager only) -->
+      {% if session.user_role in ('Admin', 'HR Manager') %}
+      <div class="mb-5">
+        <h5 class="mb-4 fw-bold">Company Signature</h5>
+        <div class="row g-4">
+          <div class="col-12">
+            <label for="signature" class="form-label fw-500">Signature Image (PNG only)</label>
+            {% if company and company.signature_path %}
+            <div style="margin-bottom:10px">
+              <img src="{{ url_for('organization.company_signature', cid=company.company_id) }}"
+                   style="max-height:80px;border:1px solid #dee2e6;border-radius:4px;padding:8px">
+              <p style="font-size:12px;color:#6c757d;margin:4px 0 0">Current signature</p>
+            </div>
+            {% endif %}
+            <input type="file" class="form-control form-control-lg" id="signature" name="signature" accept=".png">
+            <div class="form-text">Upload a PNG image of the company stamp/signature (transparent background recommended). This will be automatically embedded on contracts when sending offers.</div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Section 3: Address & Contact -->
+      <div class="mb-5">
+        <h5 class="mb-4 fw-bold">Address & Contact</h5>
+        
+        <div class="row g-4">
+          <!-- Address -->
+          <div class="col-12">
+            <label for="address" class="form-label fw-500">Address <span class="text-danger fw-bold">*</span></label>
+            <textarea class="form-control form-control-lg" id="address" name="address" rows="4"
+                      placeholder="e.g. No. 12, Jalan Semarak, 50450 Kuala Lumpur, Malaysia"
+                      maxlength="500"
+                      required
+                      style="resize: vertical;"></textarea>
+            <div class="invalid-feedback d-block text-danger">Address is required.</div>
+          </div>
+
+          <!-- Contact Number -->
+          <div class="col-12">
+            <label for="contact_no" class="form-label fw-500">Contact Number <span class="text-danger fw-bold">*</span></label>
+            <input type="tel" class="form-control form-control-lg" id="contact_no" name="contact_no"
+                   value="{{ company.contact_no if company else '' }}"
+                   placeholder="e.g. +603-2110 8888"
+                    pattern="^\+?[\d\s\-\(\)]{6,20}$"
+                   maxlength="20"
+                   required>
+            <div class="invalid-feedback d-block text-danger">Enter a valid Malaysian phone number (e.g. +603-2110 8888 or 012-3456789).</div>
+            <div class="form-text">Required. Format: +60 or 01x-xxxxxxx</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 4: Actions -->
+      <div class="d-flex gap-3">
+        <button type="submit" class="btn btn-primary btn-lg px-5">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;"><path d="M13 4L6 11l-3-3"/></svg>
+          Save Company
+        </button>
+        <a href="{{ url_for('organization.companies') }}" class="btn btn-secondary btn-lg px-5">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+  .form-control-lg, .form-select-lg {
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    border-radius: 0.375rem;
+    border: 1px solid #dee2e6;
+  }
+  
+  .form-control-lg:focus, .form-select-lg:focus {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+  }
+  
+  .fw-500 {
+    font-weight: 500;
+  }
+  
+  .invalid-feedback {
+    color: #dc3545;
+    font-weight: 500;
+    font-size: 0.875rem;
+    margin-top: 0.5rem;
+  }
+  
+  .form-text {
+    color: #6c757d;
+    font-size: 0.875rem;
+  }
+  
+  .was-validated .form-control:invalid,
+  .was-validated .form-select:invalid {
+    border-color: #dc3545;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' width='12' height='12' fill='none' stroke='%23dc3545'%3e%3ccircle cx='6' cy='6' r='4.5'/%3e%3cpath fill='%23dc3545' d='M8 4a.5.5 0 0 0-.854-.354L6.5 4.793 5.354 3.646A.5.5 0 1 0 4.5 4.5L5.793 5.854 4.646 7.146a.5.5 0 1 0 .708.708l1.146-1.147 1.146 1.147a.5.5 0 0 0 .708-.708L6.207 5.854 7.354 4.5a.5.5 0 0 0 .146-.5z'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right calc(0.375em + 0.1875rem) center;
+    background-size: calc(0.75em + 0.375rem) calc(0.75em + 0.375rem);
+    padding-right: calc(1.5em + 0.75rem);
+  }
+  
+  .was-validated .form-control:valid,
+  .was-validated .form-select:valid {
+    border-color: #198754;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3e%3cpath fill='%23198754' d='M2.3 6.73L.6 4.53c-.4-1.04.46-1.4 1.1-.8l1.1 1.4 3.4-3.8c.6-.63 1.6-.27 1.2.7l-4 4.6c-.43.5-.8.4-1.1.1z'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right calc(0.375em + 0.1875rem) center;
+    background-size: calc(0.75em + 0.375rem) calc(0.75em + 0.375rem);
+    padding-right: calc(1.5em + 0.75rem);
+  }
+</style>
+
+<script>
+  // Bootstrap 5 validation – prevents form submission if invalid
+  (function () {
+    'use strict'
+    const form = document.getElementById('companyForm');
+    
+    // Real-time validation feedback
+    form.querySelectorAll('.form-control, .form-select').forEach(field => {
+      field.addEventListener('change', function () {
+        this.classList.add('was-validated');
+      });
+      
+      field.addEventListener('blur', function () {
+        this.classList.add('was-validated');
+      });
+    });
+    
+    form.addEventListener('submit', function (event) {
+      if (!form.checkValidity()) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      form.classList.add('was-validated');
+    }, false);
+  })();
+</script>
+
+{% endblock %}

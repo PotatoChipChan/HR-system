@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block page_title %}Settings & Profile{% endblock %}
+
+{% block content %}
+<div class="tabs">
+  <div class="tab active" onclick="showSettingsTab('profile',this)">My Profile</div>
+  <div class="tab" onclick="showSettingsTab('ic-requests',this)">IC Access Requests</div>
+  <div class="tab" onclick="showSettingsTab('security',this)">Security</div>
+  <div class="tab" onclick="showSettingsTab('company',this)">Company Info</div>
+</div>
+
+<!-- Profile -->
+<div id="stab-profile" class="two-col fade-in">
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+      <div class="avatar" style="width:64px;height:64px;font-size:22px">{{ session.user_initials }}</div>
+      <div>
+        <div style="font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700">{{ emp.full_name }}</div>
+        <div class="text-muted">{{ emp.role_name }} · {{ emp.department_name }}</div>
+        <div class="text-muted">{{ emp.email }}</div>
+      </div>
+    </div>
+    <form method="POST" action="{{ url_for('settings.update_profile') }}">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Full Name</label><input class="form-input" name="full_name" value="{{ emp.full_name }}" required></div>
+        <div class="form-group"><label class="form-label">Contact No.</label><input class="form-input" name="contact_no" value="{{ emp.contact_no or '' }}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Date of Birth</label><input class="form-input" type="date" name="date_of_birth" value="{{ emp.date_of_birth or '' }}"></div>
+        <div class="form-group">
+          <label class="form-label">Gender</label>
+          <select class="form-input" name="gender" disabled>
+            <option value="" {% if not emp.gender %}selected{% endif %}>—</option>
+            <option value="Male" {% if emp.gender == 'Male' %}selected{% endif %}>Male</option>
+            <option value="Female" {% if emp.gender == 'Female' %}selected{% endif %}>Female</option>
+            <option value="Other" {% if emp.gender == 'Other' %}selected{% endif %}>Other</option>
+          </select>
+          <input type="hidden" name="gender" value="{{ emp.gender }}">
+        </div>
+      </div>
+      <div class="form-group"><label class="form-label">Address</label><textarea class="form-input" name="address" rows="2">{{ emp.address or '' }}</textarea></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Emergency Contact Name</label><input class="form-input" name="emergency_contact_name" value="{{ emp.emergency_contact_name or '' }}"></div>
+        <div class="form-group"><label class="form-label">Emergency Contact No.</label><input class="form-input" name="emergency_contact_no" value="{{ emp.emergency_contact_no or '' }}"></div>
+      </div>
+      <button class="btn btn-primary" type="submit">Save Profile</button>
+    </form>
+  </div>
+  <div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="sec-title">Employment Details</div>
+      <div class="kv-grid">
+        <div class="kv-k">Employee ID</div><div class="kv-v">#{{ '%04d'|format(emp.employee_id) }}</div>
+        <div class="kv-k">Position</div><div class="kv-v">{{ emp.position or '—' }}</div>
+        <div class="kv-k">Department</div><div class="kv-v">{{ emp.department_name }}</div>
+        <div class="kv-k">Branch</div><div class="kv-v">{{ emp.branch_name }}</div>
+        <div class="kv-k">Hire Date</div><div class="kv-v">{{ emp.hire_date }}</div>
+        <div class="kv-k">Employment Type</div><div class="kv-v">{{ emp.employment_type }}</div>
+        <div class="kv-k">Last Login</div><div class="kv-v">{{ emp.last_login or 'N/A' }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- IC Access Requests -->
+<div id="stab-ic-requests" style="display:none" class="fade-in">
+  <div class="card">
+    <div class="sec-title">IC Access Requests</div>
+    {% if pending_ic_requests %}
+      {% for req in pending_ic_requests %}
+        <div style="padding:16px;background:white;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <div style="font-weight:700;margin-bottom:4px;">{{ req.requester_name }}</div>
+              {% if req.reason %}
+                <div style="color:var(--text-secondary);font-size:13px;">Reason: {{ req.reason }}</div>
+              {% endif %}
+              <small style="color:var(--text-secondary);">{{ req.requested_at }}</small>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <form method="POST" action="{{ url_for('employees.respond_to_ic_request', req_id=req.request_id, action='reject') }}">
+                <button type="submit" class="btn btn-sm btn-danger">Reject</button>
+              </form>
+              <form method="POST" action="{{ url_for('employees.respond_to_ic_request', req_id=req.request_id, action='approve') }}">
+                <button type="submit" class="btn btn-sm btn-primary">Approve (7 days)</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-state">
+        <div class="icon">🔒</div>
+        <p>No pending IC access requests.</p>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Security -->
+<div id="stab-security" style="display:none" class="fade-in">
+  <div class="card" style="max-width:500px">
+    <div class="sec-title">Change Password</div>
+    <form method="POST" action="{{ url_for('settings.change_password') }}">
+      <div class="form-group"><label class="form-label">Current Password *</label><input class="form-input" type="password" name="old_password" required></div>
+      <div class="form-group"><label class="form-label">New Password *</label><input class="form-input" type="password" name="new_password" required minlength="6"></div>
+      <div class="form-group"><label class="form-label">Confirm New Password *</label><input class="form-input" type="password" name="confirm_password" required></div>
+      <button class="btn btn-primary" type="submit">Change Password</button>
+    </form>
+  </div>
+</div>
+
+<!-- Company -->
+<div id="stab-company" style="display:none" class="fade-in">
+  <div class="card">
+    <div class="sec-title">
+      Company Info
+      {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+      <a class="sec-link" href="{{ url_for('organization.index') }}">Manage Org →</a>
+      {% endif %}
+    </div>
+    <div class="kv-grid">
+      <div class="kv-k">Company</div><div class="kv-v fw-600">{{ company.name }}</div>
+      <div class="kv-k">Address</div><div class="kv-v">{{ company.address or '—' }}</div>
+      <div class="kv-k">Contact</div><div class="kv-v">{{ company.contact_no or '—' }}</div>
+      <div class="kv-k">Email</div><div class="kv-v">{{ company.email or '—' }}</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showSettingsTab(id, el){
+  ['profile','ic-requests','security','company'].forEach(t=>{
+    document.getElementById('stab-'+t).style.display='none';
+  });
+  document.getElementById('stab-'+id).style.display=id==='profile'?'grid':'block';
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  if(el) el.classList.add('active');
+  else {
+    document.querySelectorAll('.tab').forEach(t=>{
+      if(t.textContent.toLowerCase().includes(id.replace('-',''))) t.classList.add('active');
+    });
+  }
+}
+
+// On page load, check URL query params for active tab
+document.addEventListener('DOMContentLoaded', () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const tab = urlParams.get('tab');
+  if(tab) {
+    showSettingsTab(tab, null);
+  }
+});
+</script>
+{% endblock %}

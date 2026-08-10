@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Employees{% endblock %}
+{% block page_title %}Employee Management{% endblock %}
+
+{% block content %}
+<div class="card fade-in">
+  <div class="sec-title">
+    Employee Directory
+    <div style="display:flex;gap:8px">
+      <a class="btn btn-sm" href="#">Export</a>
+      <a class="btn btn-primary btn-sm" href="{{ url_for('employees.add_employee') }}">+ Add Employee</a>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <form method="GET" action="{{ url_for('employees.list_employees') }}">
+    <div class="filter-bar">
+      <input class="form-input" type="text" name="q" value="{{ search }}" placeholder="Search name / email / ID" style="min-width:220px">
+      <select name="dept" class="form-input">
+        <option value="">Department: All</option>
+        {% for d in departments %}
+        <option value="{{ d.department_id }}" {% if dept==d.department_id|string %}selected{% endif %}>{{ d.department_name }}</option>
+        {% endfor %}
+      </select>
+      <select name="type" class="form-input">
+        <option value="">Employment Type: All</option>
+        <option value="Full-Time" {% if etype=='Full-Time' %}selected{% endif %}>Full-Time</option>
+        <option value="Part-Time" {% if etype=='Part-Time' %}selected{% endif %}>Part-Time</option>
+        <option value="Contract"  {% if etype=='Contract'  %}selected{% endif %}>Contract</option>
+      </select>
+      <select name="status" class="form-input">
+        <option value="">Status: All</option>
+        <option value="Active"     {% if status=='Active'     %}selected{% endif %}>Active</option>
+        <option value="On Leave"   {% if status=='On Leave'   %}selected{% endif %}>On Leave</option>
+        <option value="Inactive"   {% if status=='Inactive'   %}selected{% endif %}>Inactive</option>
+        <option value="Terminated" {% if status=='Terminated' %}selected{% endif %}>Terminated</option>
+      </select>
+      <button class="btn btn-primary btn-sm" type="submit">Search</button>
+      <a class="btn btn-sm" href="{{ url_for('employees.list_employees') }}">Reset</a>
+    </div>
+  </form>
+
+  {% if employees %}
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>Employee</th>
+        <th>ID</th>
+        <th>Department</th>
+        <th>Branch</th>
+        <th>Type</th>
+        <th>Status</th>
+        <th>Hire Date</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in employees %}
+      <tr>
+        <td>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="avatar" style="width:32px;height:32px;font-size:11px">
+              {{ e.full_name[:2].upper() }}
+            </div>
+            <div>
+              <div style="font-weight:500">{{ e.full_name }}</div>
+              <div style="font-size:11px;color:var(--text-secondary)">{{ e.email }}</div>
+            </div>
+          </div>
+        </td>
+        <td style="font-family:monospace;font-size:12px">#{{ '%04d'|format(e.employee_id) }}</td>
+        <td>{{ e.department_name }}</td>
+        <td>{{ e.branch_name }}</td>
+        <td>{{ e.employment_type }}</td>
+        <td>
+          {% if e.employment_status == 'Active' %}<span class="badge badge-green">Active</span>
+          {% elif e.employment_status == 'On Leave' %}<span class="badge badge-amber">On Leave</span>
+          {% elif e.employment_status == 'Inactive' %}<span class="badge badge-gray">Inactive</span>
+          {% else %}<span class="badge badge-red">{{ e.employment_status }}</span>
+          {% endif %}
+        </td>
+        <td>{{ e.hire_date }}</td>
+        <td>
+          <a class="btn btn-sm" href="{{ url_for('employees.view_employee', emp_id=e.employee_id) }}">View</a>
+          {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+          <a class="btn btn-sm" href="{{ url_for('face.register_face_page', emp_id=e.employee_id) }}">Register Face</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="text-muted" style="margin-top:12px">Showing {{ employees|length }} result(s)</div>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon">👥</div>
+    <h3>No employees found</h3>
+    <p>Try adjusting your search filters.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

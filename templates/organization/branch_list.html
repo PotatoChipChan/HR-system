@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+
+{% block title %}Branches | SmartHR{% endblock %}
+
+{% block page_title %}Branches{% endblock %}
+
+{% block content %}
+
+<div class="card fade-in">
+  <div class="sec-title">
+    Branch Directory
+    <div style="display:flex;gap:8px">
+      <a href="{{ url_for('organization.add_branch') }}" class="btn btn-primary btn-sm">
+        + Add Branch
+      </a>
+    </div>
+  </div>
+
+  {% if session.user_role == 'Admin' %}
+  <!-- Filters -->
+  <form method="get" action="{{ url_for('organization.branches') }}">
+    <div class="filter-bar">
+      <select name="company_id" class="form-input" onchange="this.form.submit()">
+        <option value="">Company: All Companies</option>
+        {% for c in companies %}
+          <option value="{{ c.company_id }}" {% if current_company == c.company_id %}selected{% endif %}>
+            {{ c.name }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+  {% endif %}
+
+  {% if branches %}
+  <table class="tbl" id="branchTable">
+    <thead>
+      <tr>
+        <th>Branch Name</th>
+        <th>Company</th>
+        <th>Address</th>
+        <th>Contact</th>
+        <th>Manager</th>
+        <th>Parent Branch</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in branches %}
+      <tr>
+        <td>
+          <div style="font-weight:600">{{ b.name }}</div>
+        </td>
+        <td>
+          <span class="badge badge-gray">{{ b.company_name }}</span>
+        </td>
+        <td title="{{ b.address }}">{{ b.address|truncate(40) if b.address else '—' }}</td>
+        <td>{{ b.contact_no or '—' }}</td>
+        <td>
+          {% if b.manager_name %}
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="avatar" style="width:24px;height:24px;font-size:9px">
+                {{ b.manager_name[:2].upper() }}
+              </div>
+              <span>{{ b.manager_name }}</span>
+            </div>
+          {% else %}
+            <span class="text-muted" style="font-style:italic">Not assigned</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if b.parent_branch_id %}
+            {% set parent = branches|selectattr('branch_id', 'equalto', b.parent_branch_id)|first %}
+            <span class="badge badge-green">{{ parent.name if parent else 'Unknown' }}</span>
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td>
+          <div class="btn-row" style="margin-bottom:0;gap:4px">
+            <a href="{{ url_for('organization.edit_branch', bid=b.branch_id) }}" class="btn btn-sm" title="Edit">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.5 2.5l2 2L5 13l-3 1 1-3 8.5-8.5z"/></svg>
+            </a>
+            <!-- Delete button: opens the single modal -->
+            <button type="button" class="btn btn-sm btn-outline-danger delete-btn"
+                    data-branch-id="{{ b.branch_id }}"
+                    data-branch-name="{{ b.name }}"
+                    title="Delete">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10M6 4V3a1 1 0 011-1h2a1 1 0 011 1v1M5 4l1 9h4l1-9"/></svg>
+            </button>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="text-muted" style="margin-top:12px">Showing {{ branches|length }} branch(es)</div>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon">🏢</div>
+    <h3>No branches found</h3>
+    <p>Get started by <a href="{{ url_for('organization.add_branch') }}">adding a branch</a>.</p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- ======= SINGLE DELETE MODAL ======= -->
+<div class="modal-backdrop" id="deleteModal">
+  <div class="modal-card">
+    <div class="modal-title">
+      <span>Confirm Deletion</span>
+      <button type="button" class="btn btn-sm" onclick="document.getElementById('deleteModal').classList.remove('show')">✕</button>
+    </div>
+    <form id="deleteForm" method="post">
+      <div style="margin-bottom: 20px;">
+        <p>Are you sure you want to delete branch <strong id="deleteBranchName"></strong>?</p>
+        <p class="text-danger" style="margin-top: 10px;">This action cannot be undone and is only allowed if no sub-branches, departments, or active employees are associated.</p>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+        <button type="button" class="btn" onclick="document.getElementById('deleteModal').classList.remove('show')">Cancel</button>
+        <button type="submit" class="btn btn-danger">Delete</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const deleteModal = document.getElementById('deleteModal');
+    const deleteForm = document.getElementById('deleteForm');
+    let currentBranchId = null;
+    
+    // Add click listeners to all delete buttons
+    const deleteButtons = document.querySelectorAll('button.delete-btn');
+    
+    deleteButtons.forEach(button => {
+      button.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        currentBranchId = this.getAttribute('data-branch-id');
+        const branchName = this.getAttribute('data-branch-name');
+        
+        document.getElementById('deleteBranchName').textContent = branchName || 'this branch';
+        deleteModal.classList.add('show');
+      });
+    });
+
+    // Handle form submission
+    deleteForm.addEventListener('submit', function (event) {
+      event.preventDefault();
+      
+      if (currentBranchId) {
+        deleteForm.action = "{{ url_for('organization.delete_branch', bid=0) }}".replace('0', currentBranchId);
+        deleteForm.submit();
+      } else {
+        alert('Error: Branch ID not found. Please try again.');
+      }
+    });
+  });
+</script>
+{% endblock %}

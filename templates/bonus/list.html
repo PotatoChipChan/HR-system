@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block title %}Bonus Proposals{% endblock %}
+{% block page_title %}Bonus Proposals — {{ year }}{% endblock %}
+
+{% block head %}
+<style>
+  .bulk-bar { display:none; position:fixed; bottom:0; left:0; right:0; background:var(--g600); color:#fff; padding:12px 24px; z-index:999; align-items:center; gap:16px; justify-content:center; }
+  .bulk-bar.show { display:flex; }
+  .bulk-bar .btn { padding:6px 18px; font-size:13px; border:none; border-radius:6px; cursor:pointer; }
+  #rejection-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:1000; align-items:center; justify-content:center; }
+  #rejection-modal.show { display:flex; }
+  #rejection-modal .modal-box { background:#fff; padding:24px; border-radius:12px; min-width:400px; max-width:500px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="info-box" style="background:var(--g50);border:1px solid var(--g200);border-radius:8px;padding:12px 16px;margin-bottom:16px;color:var(--text-secondary);font-size:13px">
+  <strong>{{ year }} Bonus Formula:</strong>
+  Grade A = {{ policy.grade_A_months }} months salary &nbsp;|&nbsp;
+  Grade B = {{ policy.grade_B_months }} months salary &nbsp;|&nbsp;
+  Grade C = {{ policy.grade_C_months }} months salary &nbsp;|&nbsp;
+  Grade D = {{ policy.grade_D_months }} months salary &nbsp;|&nbsp;
+  Payout in month {{ policy.payout_month }}
+</div>
+
+<form id="filter-form" method="GET" style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin-bottom:20px">
+  <div>
+    <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Year</label>
+    <select name="year" onchange="this.form.submit()" class="form-control" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px">
+      {% for y in [2025, 2026, 2027] %}
+      <option value="{{ y }}" {{ 'selected' if y==year }}>{{ y }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Branch</label>
+    <select name="branch_id" onchange="this.form.submit()" class="form-control" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px">
+      <option value="">All Branches</option>
+      {% for b in branches %}
+      <option value="{{ b.branch_id }}" {{ 'selected' if branch_f|string==b.branch_id|string }}>{{ b.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Department</label>
+    <select name="department_id" onchange="this.form.submit()" class="form-control" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px">
+      <option value="">All Departments</option>
+      {% for d in departments %}
+      <option value="{{ d.department_id }}" {{ 'selected' if dept_f|string==d.department_id|string }}>{{ d.department_name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Grade</label>
+    <select name="grade" onchange="this.form.submit()" class="form-control" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px">
+      <option value="">All Grades</option>
+      {% for g in ['A','B','C','D'] %}
+      <option value="{{ g }}" {{ 'selected' if grade_f==g }}>{{ g }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Status</label>
+    <select name="status" onchange="this.form.submit()" class="form-control" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px">
+      <option value="">All Status</option>
+      {% for s in ['Pending','Approved','Rejected'] %}
+      <option value="{{ s }}" {{ 'selected' if status_f==s }}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Search</label>
+    <input type="text" name="search" value="{{ search }}" placeholder="Employee name..." class="form-control" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px" onchange="this.form.submit()">
+  </div>
+  <div style="display:flex;gap:8px;align-items:end;margin-left:auto">
+    <a class="btn btn-secondary btn-sm" href="{{ url_for('bonus.bonus_policy', year=year) }}">⚙️ Bonus Policy</a>
+    <a class="btn btn-primary btn-sm" href="{{ url_for('bonus.propose_bonuses', year=year) }}">+ Propose New</a>
+  </div>
+</form>
+
+{% if summary %}
+<div class="metric-grid" style="margin-bottom:16px">
+  <div class="metric-card">
+    <div class="metric-label">Total Proposals</div>
+    <div class="metric-val green-val">{{ summary.total or 0 }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Pending</div>
+    <div class="metric-val" style="color:var(--warning-color)">{{ summary.pending or 0 }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Approved</div>
+    <div class="metric-val" style="color:var(--success-color)">{{ summary.approved or 0 }}</div>
+  </div>
+</div>
+{% endif %}
+
+<form id="bulk-form" method="POST" action="{{ url_for('bonus.bulk_action') }}">
+<input type="hidden" name="year" value="{{ year }}">
+<div class="card" style="padding:0;overflow-x:auto">
+<table class="tbl" style="margin:0">
+  <thead>
+    <tr>
+      <th style="width:40px"><input type="checkbox" id="select-all" onchange="toggleAll(this)"></th>
+      <th>Employee</th>
+      <th>Dept</th>
+      <th>Branch</th>
+      <th>Grade</th>
+      <th>Base Salary</th>
+      <th>Full Bonus</th>
+      <th>Months Worked</th>
+      <th>Prorated Bonus</th>
+      <th>Proposed By</th>
+      <th>Status</th>
+      <th style="width:120px">Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in proposals %}
+    <tr>
+      <td>
+        {% if p.status == 'Pending' %}
+        <input type="checkbox" name="proposal_ids" value="{{ p.proposal_id }}" class="prop-checkbox" onchange="updateBulkBar()">
+        {% endif %}
+      </td>
+      <td style="font-weight:600">{{ p.full_name }}</td>
+      <td>{{ p.department_name }}</td>
+      <td>{{ p.branch_name }}</td>
+      <td>
+        {% if p.grade == 'A' %}
+        <span class="badge badge-green">{{ p.grade }}</span>
+        {% elif p.grade == 'B' %}
+        <span class="badge badge-blue">{{ p.grade }}</span>
+        {% elif p.grade == 'C' %}
+        <span class="badge badge-amber">{{ p.grade }}</span>
+        {% elif p.grade == 'D' %}
+        <span class="badge badge-grey">{{ p.grade }}</span>
+        {% else %}
+        —
+        {% endif %}
+      </td>
+      <td>RM {{ '%.2f'|format(p.base_salary) }}</td>
+      <td>RM {{ '%.2f'|format(p.full_bonus_amount or 0) }}</td>
+      <td>{{ p.months_worked }}/12</td>
+      <td style="font-weight:600;color:var(--g600)">RM {{ '%.2f'|format(p.bonus_amount) }}</td>
+      <td>{{ p.proposer_name or '—' }}</td>
+      <td>
+        {% if p.status == 'Pending' %}
+        <span class="badge badge-amber">Pending</span>
+        {% elif p.status == 'Approved' %}
+        <span class="badge badge-green">Approved</span>
+        {% elif p.status == 'Rejected' %}
+        <span class="badge badge-grey">Rejected</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if p.status == 'Pending' %}
+        <div style="display:flex;gap:6px">
+          <button type="button" class="btn btn-success btn-sm" style="padding:3px 10px;font-size:12px" onclick="approveSingle({{ p.proposal_id }})">Approve</button>
+          <button type="button" class="btn btn-danger btn-sm" style="padding:3px 10px;font-size:12px" onclick="showRejectModal({{ p.proposal_id }})">Reject</button>
+        </div>
+        {% elif p.status == 'Rejected' and p.rejection_reason %}
+        <span style="font-size:12px;color:var(--text-secondary)" title="{{ p.rejection_reason }}">{{ p.rejection_reason[:20] }}{% if p.rejection_reason|length > 20 %}…{% endif %}</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="12" style="text-align:center;padding:40px;color:var(--text-secondary)">No bonus proposals found for {{ year }}.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<div class="bulk-bar" id="bulk-bar">
+  <span id="bulk-count">0 selected</span>
+  <button type="submit" name="action" value="approve" class="btn" style="background:#16a34a;color:#fff">✓ Approve Selected</button>
+  <button type="button" class="btn" style="background:#dc2626;color:#fff" onclick="showBulkRejectModal()">✕ Reject Selected</button>
+</div>
+</form>
+
+<div id="rejection-modal">
+  <div class="modal-box">
+    <h3 style="margin:0 0 12px">Rejection Reason</h3>
+    <textarea id="modal-reason" rows="3" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;resize:vertical;margin-bottom:12px" placeholder="Enter reason for rejection..."></textarea>
+    <div style="display:flex;gap:8px;justify-content:end">
+      <button type="button" class="btn btn-secondary btn-sm" onclick="closeRejectModal()">Cancel</button>
+      <button type="button" class="btn btn-danger btn-sm" onclick="submitReject()">Reject</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let rejectPropId = null;
+let rejectMode = 'single';
+
+function approveSingle(id) {
+  const f = document.createElement('form');
+  f.method = 'POST';
+  f.action = '/bonus/' + id + '/approve';
+  document.body.appendChild(f);
+  f.submit();
+}
+
+function toggleAll(el) {
+  document.querySelectorAll('.prop-checkbox').forEach(cb => cb.checked = el.checked);
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const checked = document.querySelectorAll('.prop-checkbox:checked');
+  const bar = document.getElementById('bulk-bar');
+  const count = document.getElementById('bulk-count');
+  count.textContent = checked.length + ' selected';
+  bar.classList.toggle('show', checked.length > 0);
+  document.getElementById('bulk-form').style.paddingBottom = checked.length > 0 ? '70px' : '0';
+}
+
+function showRejectModal(propId) {
+  rejectPropId = propId;
+  rejectMode = 'single';
+  document.getElementById('modal-reason').value = '';
+  document.getElementById('rejection-modal').classList.add('show');
+}
+
+function showBulkRejectModal() {
+  const ids = Array.from(document.querySelectorAll('.prop-checkbox:checked')).map(cb => cb.value);
+  if (ids.length === 0) return;
+  rejectPropId = ids;
+  rejectMode = 'bulk';
+  document.getElementById('modal-reason').value = '';
+  document.getElementById('rejection-modal').classList.add('show');
+}
+
+function closeRejectModal() {
+  document.getElementById('rejection-modal').classList.remove('show');
+}
+
+function submitReject() {
+  const reason = document.getElementById('modal-reason').value.trim() || 'No reason provided';
+  const modal = document.getElementById('rejection-modal');
+  modal.classList.remove('show');
+
+  if (rejectMode === 'single') {
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/bonus/' + rejectPropId + '/reject';
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'rejection_reason';
+    input.value = reason;
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+  } else {
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/bonus/bulk-action';
+    const actionInput = document.createElement('input');
+    actionInput.type = 'hidden';
+    actionInput.name = 'action';
+    actionInput.value = 'reject';
+    form.appendChild(actionInput);
+    const reasonInput = document.createElement('input');
+    reasonInput.type = 'hidden';
+    reasonInput.name = 'rejection_reason';
+    reasonInput.value = reason;
+    form.appendChild(reasonInput);
+    rejectPropId.forEach(function(id) {
+      const inp = document.createElement('input');
+      inp.type = 'hidden';
+      inp.name = 'proposal_ids';
+      inp.value = id;
+      form.appendChild(inp);
+    });
+    document.body.appendChild(form);
+    form.submit();
+  }
+}
+</script>
+{% endblock %}

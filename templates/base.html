@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}SmartHR{% endblock %} | AI-Powered HR Platform</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<style>
+#toast-container { position:fixed; top:80px; right:24px; z-index:9999; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
+.toast-inc { background:#1e293b; color:#fff; padding:14px 20px; border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,0.2); display:flex; align-items:center; gap:12px; font-size:14px; transform:translateX(120%); opacity:0; transition:transform 0.4s ease, opacity 0.4s ease; max-width:380px; pointer-events:auto; }
+.toast-inc.show { transform:translateX(0); opacity:1; }
+.toast-inc.collapsed { height:0; overflow:hidden; margin:0; padding:0; border:none; pointer-events:none; }
+.toast-inc .toast-link { color:#86efac; text-decoration:none; font-weight:600; white-space:nowrap; }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body data-user-id="{{ session.get('user_id', '') }}">
+<div class="app">
+  <div class="sidebar-overlay" onclick="document.body.classList.remove('sidebar-open')"></div>
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <a class="logo" href="{{ url_for('main.dashboard') }}">
+      <div class="logo-icon">
+        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:24px;height:24px;">
+          <path d="M11 21C11 21 12.5 14 16 14C19.5 14 21 21 21 21" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+          <circle cx="16" cy="10" r="3" fill="white"/>
+        </svg>
+      </div>
+      <div class="logo-text">SmartHR<span>AI-Powered Platform</span></div>
+    </a>
+    <div class="nav">
+      <a class="nav-item {% if request.endpoint=='main.dashboard' %}active{% endif %}"
+         href="{{ url_for('main.dashboard') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="2" y="2" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="10" y="2" width="6" height="6" rx="1.5" fill="currentColor" opacity=".6"/><rect x="2" y="10" width="6" height="6" rx="1.5" fill="currentColor" opacity=".6"/><rect x="10" y="10" width="6" height="6" rx="1.5" fill="currentColor" opacity=".6"/></svg>
+        Dashboard
+      </a>
+
+      {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+      <div class="nav-section-group collapsed">
+        <div class="nav-section-header" onclick="toggleNavSection(this)">
+          <span class="nav-section-toggle">▶</span>
+          Organisation
+        </div>
+        <div class="nav-section-items">
+      <a class="nav-item {% if request.blueprint=='organization' and request.endpoint=='organization.companies' %}active{% endif %}"
+         href="{{ url_for('organization.companies') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="2" y="4" width="14" height="12" rx="1.5" stroke="currentColor"/><path d="M6 4V2h6v2" stroke="currentColor"/><path d="M6 7h6M6 10h4" stroke="currentColor"/></svg>
+        Companies
+      </a>
+      <a class="nav-item {% if request.blueprint=='organization' and request.endpoint=='organization.branches' %}active{% endif %}"
+         href="{{ url_for('organization.branches') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><path d="M3 5L9 2l6 3v8l-6 3-6-3V5z" stroke="currentColor"/><path d="M9 5v5" stroke="currentColor"/><circle cx="9" cy="12" r="1" fill="currentColor"/></svg>
+        Branches
+      </a>
+      <a class="nav-item {% if request.blueprint=='organization' and request.endpoint=='organization.departments' %}active{% endif %}"
+         href="{{ url_for('organization.departments') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="3" y="7" width="4" height="8" rx="1" stroke="currentColor"/><rect x="11" y="7" width="4" height="8" rx="1" stroke="currentColor"/><rect x="3" y="2" width="12" height="3" rx="1.5" fill="currentColor"/></svg>
+        Departments
+      </a>
+      </div>
+      </div>
+      {% endif %}
+
+      {% if session.user_role in ['Admin','HR Director','HR Manager','HR','Manager'] %}
+      <div class="nav-section-group collapsed">
+        <div class="nav-section-header" onclick="toggleNavSection(this)">
+          <span class="nav-section-toggle">▶</span>
+          User Management
+        </div>
+        <div class="nav-section-items">
+      <a class="nav-item {% if request.blueprint=='employees' and request.endpoint=='employees.list_employees' %}active{% endif %}"
+         href="{{ url_for('employees.list_employees') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><circle cx="9" cy="6" r="3" fill="currentColor"/><path d="M3 15c0-3.314 2.686-5 6-5s6 1.686 6 5" stroke="currentColor" stroke-width="1.5"/></svg>
+        Employees
+      </a>
+      {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+      <a class="nav-item {% if request.blueprint=='organization' and request.endpoint=='organization.roles' %}active{% endif %}"
+         href="{{ url_for('organization.roles') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><circle cx="5" cy="6" r="2" fill="currentColor"/><circle cx="13" cy="6" r="2" fill="currentColor"/><path d="M1 14c0-2.5 2-4 4-4s4 1.5 4 4" stroke="currentColor"/><path d="M9 14c0-2.5 2-4 4-4s4 1.5 4 4" stroke="currentColor"/><path d="M5 10v-2M13 10v-2" stroke="currentColor"/></svg>
+        Roles &amp; Permissions
+      </a>
+      {% endif %}
+      </div>
+      </div>
+      {% endif %}
+
+      <div class="nav-section-group collapsed">
+        <div class="nav-section-header" onclick="toggleNavSection(this)">
+          <span class="nav-section-toggle">▶</span>
+          Time &amp; Attendance
+        </div>
+        <div class="nav-section-items">
+      <a class="nav-item {% if request.endpoint=='face.face_attendance_page' %}active{% endif %}"
+         href="{{ url_for('face.face_attendance_page') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><circle cx="9" cy="7" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M4 15c.5-2.5 2.5-4 5-4s4.5 1.5 5 4" stroke="currentColor"/></svg>
+        Face Attendance
+      </a>
+      {% if session.get('biometric_checkin_failures', 0) >= 3 %}
+      <a class="nav-item {% if 'manual' in request.args %}active{% endif %}"
+         href="{{ url_for('face.face_attendance_page', manual=1) }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="3" y="2" width="12" height="14" rx="2" stroke="currentColor"/><path d="M6 7h6M6 10h4" stroke="currentColor"/></svg>
+        Manual Check-In
+      </a>
+      {% endif %}
+      {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+      <a class="nav-item {% if request.endpoint=='face.registration_list' %}active{% endif %}"
+         href="{{ url_for('face.registration_list') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><circle cx="9" cy="7" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M4 15c.5-2.5 2.5-4 5-4s4.5 1.5 5 4" stroke="currentColor"/><path d="M6 3l6 2M12 3l-6 2" stroke="currentColor"/></svg>
+        Face Registration
+      </a>
+      <a class="nav-item {% if request.endpoint=='attendance.manual' %}active{% endif %}"
+         href="{{ url_for('attendance.manual') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="3" y="2" width="12" height="14" rx="2" stroke="currentColor"/><path d="M6 7h6M6 10h4" stroke="currentColor"/></svg>
+        Manual Attendance
+      </a>
+      <a class="nav-item {% if request.endpoint=='attendance.manual_pending_review' %}active{% endif %}"
+         href="{{ url_for('attendance.manual_pending_review') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><path d="M3 9l4 4 8-8" stroke="currentColor" stroke-width="1.6"/></svg>
+        Pending Review
+        {% if pending_manual_count > 0 %}<span class="nav-badge" style="background:#f59e0b">{{ pending_manual_count }}</span>{% endif %}
+      </a>
+      {% endif %}
+      <a class="nav-item {% if request.endpoint=='attendance.time_tracking' %}active{% endif %}"
+         href="{{ url_for('attendance.time_tracking') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M9 5v4l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Time Tracking
+      </a>
+      <a class="nav-item {% if request.endpoint=='attendance.attendance_logs' %}active{% endif %}"
+         href="{{ url_for('attendance.attendance_logs') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="3" y="2" width="12" height="14" rx="2" stroke="currentColor"/><path d="M6 6h6M6 9h6M6 12h4" stroke="currentColor"/></svg>
+        Attendance Logs
+      </a>
+      <a class="nav-item {% if request.endpoint=='leave.apply' %}active{% endif %}"
+         href="{{ url_for('leave.apply') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="2" y="4" width="14" height="12" rx="2" stroke="currentColor"/><path d="M6 2v4M12 2v4M2 8h14" stroke="currentColor"/></svg>
+        Apply Leave
+      </a>
+      {% if session.user_role in ['Admin','HR Director','HR Manager','HR','Manager'] %}
+      <a class="nav-item {% if request.endpoint=='leave.approve_list' %}active{% endif %}"
+         href="{{ url_for('leave.approve_list') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><path d="M3 9l4 4 8-8" stroke="currentColor" stroke-width="1.6"/></svg>
+        Leave Approvals
+      </a>
+      {% endif %}
+      </div>
+      </div>
+
+      <div class="nav-section-group collapsed">
+        <div class="nav-section-header" onclick="toggleNavSection(this)">
+          <span class="nav-section-toggle">▶</span>
+          Finance &amp; Payroll
+        </div>
+        <div class="nav-section-items">
+      <a class="nav-item {% if request.blueprint=='payroll' %}active{% endif %}"
+         href="{{ url_for('payroll.list_payroll') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="2" y="4" width="14" height="10" rx="2" stroke="currentColor"/><path d="M6 9h6M9 7v4" stroke="currentColor"/></svg>
+        Payroll Processing
+      </a>
+      <a class="nav-item {% if request.blueprint=='invoice' and request.endpoint!='invoice.claims_management' %}active{% endif %}"
+         href="{{ url_for('invoice.list_invoices') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="3" y="2" width="12" height="14" rx="2" stroke="currentColor"/><path d="M6 6h6M6 9h6M6 12h4" stroke="currentColor"/></svg>
+        AI Expense Claims
+      </a>
+      {% if session.user_role in ['Admin','HR Director','HR Manager','HR','Manager'] %}
+      <a class="nav-item {% if request.endpoint=='invoice.claims_management' %}active{% endif %}"
+         href="{{ url_for('invoice.claims_management') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><path d="M3 9l3 3 9-9" stroke="currentColor" stroke-width="1.6"/><rect x="2.5" y="2.5" width="13" height="13" rx="2" stroke="currentColor" opacity=".6"/></svg>
+        Claims Management
+      </a>
+      {% endif %}
+      </div>
+      </div>
+
+      <div class="nav-section-group collapsed">
+        <div class="nav-section-header" onclick="toggleNavSection(this)">
+          <span class="nav-section-toggle">▶</span>
+          Performance
+        </div>
+        <div class="nav-section-items">
+      <a class="nav-item {% if request.blueprint=='performance' %}active{% endif %}"
+         href="{{ url_for('performance.list_scores') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><path d="M3 14l4-4 3 3 5-7" stroke="currentColor" stroke-width="1.5"/></svg>
+        Performance Scores
+      </a>
+      {% if session.user_role in ['Admin','HR Director','HR Manager'] %}
+      <a class="nav-item {% if request.blueprint=='year_end' and request.endpoint=='year_end.review' %}active{% endif %}"
+         href="{{ url_for('year_end.review') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><path d="M9 11V9m0-4h.01" stroke="currentColor" stroke-width="1.5"/><path d="M17 9a8 8 0 11-16 0 8 8 0 0116 0z" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M6 10s1-2 3-2 3 2 3 2" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+        Year-End Review
+        {% set pending_total = (pending_increment_count or 0) + (pending_bonus_count or 0) %}
+        {% if pending_total > 0 %}<span class="nav-badge">{{ pending_total }}</span>{% endif %}
+      </a>
+      <a class="nav-item {% if request.blueprint=='year_end' and request.endpoint=='year_end.policy' %}active{% endif %}"
+         href="{{ url_for('year_end.policy') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><path d="M10 3H4a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2V8" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M10 3h4m0 0v4m0-4L8 9" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+        Compensation Policy
+      </a>
+      {% endif %}
+      </div>
+      </div>
+
+      <div class="nav-section-group collapsed">
+        <div class="nav-section-header" onclick="toggleNavSection(this)">
+          <span class="nav-section-toggle">▶</span>
+          Recruitment
+        </div>
+        <div class="nav-section-items">
+      <a class="nav-item {% if request.blueprint=='recruitment' and request.endpoint=='recruitment.list_postings' %}active{% endif %}"
+         href="{{ url_for('recruitment.list_postings') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="3" y="7" width="4" height="8" rx="1" stroke="currentColor"/><rect x="11" y="7" width="4" height="8" rx="1" stroke="currentColor"/><rect x="3" y="2" width="12" height="3" rx="1.5" fill="currentColor"/></svg>
+        Job Postings
+      </a>
+      <a class="nav-item {% if request.blueprint=='recruitment' and request.endpoint=='recruitment.list_vacancy_requests' %}active{% endif %}"
+         href="{{ url_for('recruitment.list_vacancy_requests') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="3" y="2" width="12" height="14" rx="2" stroke="currentColor"/><path d="M6 6h6M6 9h6M6 12h4" stroke="currentColor"/></svg>
+         Applications (Internal)
+         {% if pending_vacancy_count > 0 %}<span class="nav-badge" style="background:#f59e0b">{{ pending_vacancy_count }}</span>{% endif %}
+      </a>
+      {% if session.user_role in ('Admin','HR','HR Manager','HR Director','Manager') %}
+      <a class="nav-item {% if request.blueprint=='recruitment' and request.endpoint=='recruitment.list_applications' %}active{% endif %}"
+         href="{{ url_for('recruitment.list_applications') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="3" y="2" width="12" height="14" rx="2" stroke="currentColor"/><path d="M6 6h6M6 9h6M6 12h4" stroke="currentColor"/></svg>
+        Applications (External){% if pending_applications_count > 0 %}<span class="nav-badge" id="nav-apps-badge">{{ pending_applications_count }}</span>{% endif %}
+      </a>
+      <a class="nav-item {% if request.blueprint=='recruitment' and request.endpoint=='recruitment.list_interviews' %}active{% endif %}"
+         href="{{ url_for('recruitment.list_interviews') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="2" y="4" width="14" height="12" rx="2" stroke="currentColor"/><path d="M6 2v4M12 2v4M2 8h14" stroke="currentColor"/></svg>
+         Interviews
+      </a>
+      {% endif %}
+      {% if session.user_role in ('Admin','HR','HR Manager','HR Director') %}
+      <a class="nav-item {% if request.blueprint=='recruitment' and request.endpoint=='recruitment.interview_policy' %}active{% endif %}"
+         href="{{ url_for('recruitment.interview_policy') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><circle cx="9" cy="9" r="2.5" stroke="currentColor"/><path d="M9 3v2M9 13v2M3 9h2M13 9h2" stroke="currentColor"/></svg>
+         Interview Policy
+      </a>
+      <a class="nav-item" href="{{ url_for('recruitment.careers') }}" target="_blank">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><path d="M5 3v12M3 5h12M15 15H3" stroke="currentColor" stroke-width="1.5"/><path d="M9 5v8M5 9h8" stroke="currentColor" stroke-width="1.5"/></svg>
+        Careers Page&nbsp;↗
+      </a>
+      {% endif %}
+
+      </div>
+      </div>
+
+      <div class="nav-section-group collapsed">
+        <div class="nav-section-header" onclick="toggleNavSection(this)">
+          <span class="nav-section-toggle">▶</span>
+          System
+        </div>
+        <div class="nav-section-items">
+      {% if session.user_role in ['Admin','HR Director','HR Manager','HR','Manager'] %}
+      <a class="nav-item {% if request.blueprint=='reports' %}active{% endif %}"
+         href="{{ url_for('reports.index') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><path d="M3 14l4-4 3 3 5-7" stroke="currentColor" stroke-width="1.5"/></svg>
+        Reports &amp; Analytics
+      </a>
+      {% endif %}
+      {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+      <a class="nav-item {% if request.blueprint=='audit' %}active{% endif %}"
+         href="{{ url_for('audit.index') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><path d="M3 3h12v12H3z" stroke="currentColor"/><path d="M6 6h6M6 9h6M6 12h4" stroke="currentColor"/></svg>
+        System Audit Log
+      </a>
+      {% endif %}
+      <a class="nav-item {% if request.blueprint=='settings' %}active{% endif %}"
+         href="{{ url_for('settings.index') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><circle cx="9" cy="9" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M9 2v1.5M9 14.5V16M2 9h1.5M14.5 9H16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Settings &amp; Profile
+      </a>
+      </div>
+      </div>
+    </div>
+    <div class="sidebar-bottom">
+      <div class="avatar">{{ session.user_initials }}</div>
+      <div class="user-info">
+        <div class="user-name">{{ session.user_name }}</div>
+        <div class="user-role">{{ session.user_role }}</div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="header">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <button class="hamburger-btn" onclick="document.body.classList.toggle('sidebar-open')" title="Toggle Sidebar">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+        </button>
+        <div class="page-title" id="page-title">{% block page_title %}SmartHR{% endblock %}</div>
+      </div>
+
+      <div class="hdr-search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input type="text" placeholder="Search anything...">
+      </div>
+
+      <div style="display:flex; align-items:center; gap:8px;">
+        <a href="#" class="hdr-btn" title="Notifications" onclick="toggleNotifications(); return false;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+          {% if has_unread_notifications %}<div class="notif-dot"></div>{% endif %}
+        </a>
+
+          <div id="notif-dropdown" class="notif-dropdown">
+          <div class="notif-header">Notifications</div>
+          <div class="notif-body">
+            {% if header_notifications %}
+              {% for n in header_notifications %}
+                {% if n.type == 'Approval' %}
+                  <div class="notif-item" style="cursor: pointer;"
+                       onclick="window.location.href='{% if n.ref == 'Increment' %}{{ url_for('increment.list_increments') }}{% elif n.ref == 'Bonus' %}{{ url_for('bonus.list_bonuses') }}{% elif n.ref == 'Application' %}{{ url_for('recruitment.list_applications') }}{% elif n.ref == 'Offer' %}{{ url_for('recruitment.list_applications') }}{% endif %}'">
+                    <div class="notif-title">{{ n.ref }} {% if n.ref in ('Application','Offer') %}Pending{% else %}Approval{% endif %}</div>
+                    <div class="notif-message" style="color:var(--g600);font-weight:500">{{ n.message }}</div>
+                    {% if n.dt %}<div class="notif-time">{{ n.dt[:16] }}</div>{% endif %}
+                  </div>
+                {% elif n.type == 'System' %}
+                  <div class="notif-item" style="cursor: pointer;" onclick="window.location.href='{{ n.related_url or url_for('employees.get_notifications') }}'">
+                    <div class="notif-title">{{ n.notif_type }}: {{ n.ref }}</div>
+                    <div class="notif-message">{{ n.message }}</div>
+                    <div class="notif-time">{{ n.dt[:16] }}</div>
+                  </div>
+                {% else %}
+                  <div class="notif-item" style="cursor: pointer;"
+                       onclick="window.location.href='{% if n.type == 'Leave' %}{{ url_for('leave.approve_list') }}{% elif n.type == 'Invoice' %}{{ url_for('invoice.claims_management') }}{% else %}{{ n.related_url or url_for('employees.get_notifications') }}{% endif %}'">
+                    <div class="notif-title">{{ n.type }}: {{ n.ref }}</div>
+                    {% if n.message %}<div class="notif-message" style="color:var(--g600);font-weight:500">{{ n.message }}</div>{% endif %}
+                    <div class="notif-time">{{ n.dt[:16] }}</div>
+                  </div>
+                {% endif %}
+              {% endfor %}
+            {% else %}
+              <div class="notif-empty">No new notifications</div>
+            {% endif %}
+            <div style="padding: 12px; border-top: 1px solid var(--border-color);">
+              <a href="{{ url_for('employees.get_notifications') }}" style="color: var(--success-color); text-decoration: none; font-weight: 600;">View All Notifications →</a>
+            </div>
+          </div>
+        </div>
+
+        <a class="hdr-btn" href="{{ url_for('settings.index') }}" title="Profile">
+          <div class="avatar" style="width:28px;height:28px;font-size:11px">{{ session.user_initials }}</div>
+        </a>
+        <a class="btn btn-sm" href="{{ url_for('auth.logout') }}" style="color:#a32d2d;border-color:#f5c6c6">Logout</a>
+      </div>
+    </div>
+
+    <div class="content">
+      <div id="toast-container">
+{% if session.user_role in ['Admin','HR Director','HR Manager'] and pending_increment_count > 0 %}
+<div class="toast-inc" id="increment-toast">
+  <span>⚠️</span>
+  <span>{{ pending_increment_count }} salary increment{{ 's' if pending_increment_count > 1 }} pending review.</span>
+  <a class="toast-link" href="{{ url_for('increment.list_increments') }}">View →</a>
+</div>
+{% endif %}
+
+{% if session.user_role in ['Admin','HR Director','HR Manager'] and pending_bonus_count > 0 %}
+<div class="toast-inc" id="bonus-toast">
+  <span>🎯</span>
+  <span>{{ pending_bonus_count }} bonus proposal{{ 's' if pending_bonus_count > 1 }} pending review.</span>
+  <a class="toast-link" href="{{ url_for('bonus.list_bonuses') }}">View →</a>
+</div>
+{% endif %}
+
+{% if session.user_role in ('Admin','HR','HR Manager','HR Director') and pending_applications_count > 0 %}
+<div class="toast-inc" id="apps-toast">
+  <span>📋</span>
+  <span>{{ pending_applications_count }} job application{{ 's' if pending_applications_count != 1 }} pending review.</span>
+  <a class="toast-link" href="{{ url_for('recruitment.list_applications') }}">View →</a>
+</div>
+{% endif %}
+
+{% if session.user_role in ['Admin','HR Director','HR Manager'] and pending_leave_count > 0 %}
+<div class="toast-inc" id="leave-toast">
+  <span>📅</span>
+  <span>{{ pending_leave_count }} leave request{{ 's' if pending_leave_count > 1 }} pending approval.</span>
+  <a class="toast-link" href="{{ url_for('leave.approve_list') }}">View →</a>
+</div>
+{% endif %}
+
+{% if session.user_role in ['Admin','HR Director','HR Manager'] and pending_invoice_count > 0 %}
+<div class="toast-inc" id="invoice-toast">
+  <span>📄</span>
+  <span>{{ pending_invoice_count }} invoice claim{{ 's' if pending_invoice_count > 1 }} pending review.</span>
+  <a class="toast-link" href="{{ url_for('invoice.claims_management') }}">View →</a>
+</div>
+{% endif %}
+</div>
+
+      <!-- Flash messages -->
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for cat, msg in messages %}
+          <div class="alert alert-{{ cat }} fade-in">
+            <span>{% if cat=='success' %}✅{% elif cat=='danger' %}❌{% elif cat=='warning' %}⚠️{% else %}ℹ️{% endif %}</span>
+            {{ msg }}
+          </div>
+        {% endfor %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+</div>
+
+{% block modals %}{% endblock %}
+
+<script>
+// Active nav highlight is handled by Jinja2 classes above
+// Tab switching helper
+function switchTab(el, groupClass){
+  el.closest('.'+groupClass).querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+}
+function toggleNotifications(){
+  document.getElementById('notif-dropdown').classList.toggle('show');
+}
+window.onclick = function(event) {
+  if (!event.target.closest('.hdr-btn') && !event.target.closest('.notif-dropdown')) {
+    var dropdowns = document.getElementsByClassName("notif-dropdown");
+    for (var i = 0; i < dropdowns.length; i++) {
+      var openDropdown = dropdowns[i];
+      if (openDropdown.classList.contains('show')) {
+        openDropdown.classList.remove('show');
+      }
+    }
+  }
+}
+
+// Collapsible navigation sections (per-user persistence via localStorage)
+function toggleNavSection(header) {
+  const group = header.closest('.nav-section-group');
+  group.classList.toggle('collapsed');
+  const uid = document.body.dataset.userId;
+  if (uid) {
+    const idx = Array.from(document.querySelectorAll('.nav-section-group')).indexOf(group);
+    localStorage.setItem('nav-' + uid + '-sec-' + idx, group.classList.contains('collapsed') ? '1' : '0');
+  }
+}
+
+// Restore per-user collapsed state from localStorage
+window.addEventListener('DOMContentLoaded', function() {
+  const uid = document.body.dataset.userId;
+  if (!uid) return;
+  document.querySelectorAll('.nav-section-group').forEach((group, idx) => {
+    const saved = localStorage.getItem('nav-' + uid + '-sec-' + idx);
+    if (saved === '0') group.classList.remove('collapsed');
+  });
+});
+
+</script>
+{% if session.user_role in ('Admin','HR','HR Manager','HR Director') %}
+<script>
+(function() {
+  var pollCount = 0;
+  function pollEmail() {
+    pollCount++;
+    fetch('/api/check-email')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.ok) return;
+        var msgs = [];
+        if (data.new_apps > 0) msgs.push(data.new_apps + ' new application(s)');
+        if (data.new_accepts > 0) msgs.push(data.new_accepts + ' offer(s) accepted');
+        if (data.new_declines > 0) msgs.push(data.new_declines + ' offer(s) declined');
+        if (msgs.length > 0) {
+          var container = document.getElementById('toast-container');
+          if (!container) return;
+          var toast = document.createElement('div');
+          toast.className = 'toast-inc show';
+          toast.innerHTML = '<span>\ud83d\udcec</span><span>' + msgs.join(' \u00b7 ') + '</span>';
+          container.appendChild(toast);
+          setTimeout(function() { if (toast.parentNode) toast.remove(); }, 6000);
+          if (data.new_apps > 0) {
+            document.dispatchEvent(new CustomEvent('new-applications-found', { detail: data }));
+          }
+        }
+        if (data.total_apps !== undefined) {
+          var badge = document.getElementById('nav-apps-badge');
+          if (badge) {
+            badge.textContent = data.total_apps;
+            if (data.total_apps === 0) badge.style.display = 'none';
+            else badge.style.display = '';
+          }
+        }
+      })
+      .catch(function() {});
+  }
+  // Poll immediately on page load, then every 30s
+  pollEmail();
+  setInterval(pollEmail, 30000);
+})();
+</script>
+{% endif %}
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Attendance Logs{% endblock %}
+{% block page_title %}Attendance Logs{% endblock %}
+
+{% block content %}
+<div class="metric-grid" style="margin-bottom:20px">
+  <div class="metric-card">
+    <div class="metric-label">Total Records</div>
+    <div class="metric-val green-val">{{ stats.total_records or 0 }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Biometric</div>
+    <div class="metric-val">{{ stats.biometric_count or 0 }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Manual</div>
+    <div class="metric-val">{{ stats.manual_count or 0 }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Avg Confidence</div>
+    <div class="metric-val">{{ stats.avg_confidence or '—' }}{% if stats.avg_confidence %}%{% endif %}</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Total Hours</div>
+    <div class="metric-val green-val">{{ stats.total_hours or 0 }}h</div>
+  </div>
+</div>
+
+<div class="card fade-in section-gap">
+  <div class="sec-title">Filter Logs</div>
+  <form method="GET" action="{{ url_for('attendance.attendance_logs') }}">
+    <div class="filter-bar">
+      <input type="date" name="from" class="form-input" value="{{ date_from }}">
+      <input type="date" name="to" class="form-input" value="{{ date_to }}">
+      <select name="method" class="form-input">
+        <option value="">All Methods</option>
+        <option value="biometric" {% if method=='biometric' %}selected{% endif %}>Biometric</option>
+        <option value="manual" {% if method=='manual' %}selected{% endif %}>Manual</option>
+      </select>
+      {% if session.user_role in ['Admin','HR Director','HR Manager','HR','Manager'] %}
+      <select name="employee" class="form-input">
+        <option value="">All Employees</option>
+        {% for e in employees %}
+        <option value="{{ e.employee_id }}" {% if emp_filter==e.employee_id|string %}selected{% endif %}>{{ e.full_name }}</option>
+        {% endfor %}
+      </select>
+      <select name="branch" class="form-input">
+        <option value="">All Branches</option>
+        {% for b in branches %}
+        <option value="{{ b.branch_id }}" {% if branch==b.branch_id|string %}selected{% endif %}>{{ b.name }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
+      <button class="btn btn-primary" type="submit">Apply</button>
+      <a href="{{ url_for('attendance.attendance_logs', from=date_from, to=date_to, method=method, employee=emp_filter, branch=branch, export='csv') }}" class="btn btn-sm">📄 Export CSV</a>
+    </div>
+  </form>
+</div>
+
+<div class="card fade-in">
+  <div class="sec-title">Attendance Records</div>
+  {% if logs %}
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>Employee</th>
+        <th>Department</th>
+        <th>Branch</th>
+        <th>Check In</th>
+        <th>Check Out</th>
+        <th>Hours</th>
+        <th>OT</th>
+        <th>Method</th>
+        <th>Confidence</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in logs %}
+      <tr>
+        <td>{{ a.full_name }}</td>
+        <td>{{ a.department_name }}</td>
+        <td>{{ a.branch_name }}</td>
+        <td>{{ a.check_in[11:16] }}<br><span class="text-muted" style="font-size:11px">{{ a.check_in[:10] }}</span></td>
+        <td>
+          {% if a.check_out %}
+          {{ a.check_out[11:16] }}<br><span class="text-muted" style="font-size:11px">{{ a.check_out[:10] }}</span>
+          {% else %}
+          <span class="badge badge-amber">Active</span>
+          {% endif %}
+        </td>
+        <td>{{ '%.1f'|format(a.hours_worked) if a.hours_worked else '—' }}h</td>
+        <td>{{ '%.1f'|format(a.overtime_hours) if a.overtime_hours else '0' }}h</td>
+        <td>
+          {% if a.is_manual_entry %}
+          <span class="badge badge-blue">Manual</span>
+          {% else %}
+          <span class="badge badge-green">Biometric</span>
+          {% endif %}
+        </td>
+        <td>{% if a.confidence_score %}{{ '%.1f'|format(a.confidence_score) }}%{% else %}—{% endif %}</td>
+        <td>
+          {% if a.status=='Approved' %}<span class="badge badge-green">Approved</span>
+          {% elif a.status=='Flagged' %}<span class="badge badge-red">Flagged</span>
+          {% else %}<span class="badge badge-amber">{{ a.status }}</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="text-muted" style="margin-top:12px">{{ logs|length }} record(s) shown (max 500)</div>
+  {% else %}
+  <div class="empty-state"><div class="icon">📋</div><h3>No logs found</h3><p>Try adjusting the date range or filters.</p></div>
+  {% endif %}
+</div>
+{% endblock %}

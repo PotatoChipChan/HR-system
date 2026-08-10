@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Apply – {{ posting.title }}{% endblock %}
+{% block page_title %}Apply for {{ posting.title }}{% endblock %}
+{% block content %}
+<div class="card fade-in" style="max-width:700px;margin:0 auto">
+  <p style="margin-bottom:16px;color:#555">
+    <strong>Department:</strong> {{ posting.department_name }} &middot;
+    <strong>Location:</strong> {{ posting.branch_name }} &middot;
+    <strong>Type:</strong> {{ posting.employment_type }}
+  </p>
+  {% if posting.min_salary %}
+  <p style="margin-bottom:16px;color:#555"><strong>Salary:</strong> RM{{ posting.min_salary }}{% if posting.max_salary %} – RM{{ posting.max_salary }}{% endif %}</p>
+  {% endif %}
+  <hr style="margin:16px 0">
+  <form method="POST" enctype="multipart/form-data">
+    <div class="form-row">
+      <div class="form-group mb-0"><label class="label">Full Name *</label><input class="form-input" name="applicant_name" required placeholder="e.g. Ahmad bin Ali"></div>
+      <div class="form-group mb-0"><label class="label">Email *</label><input class="form-input" type="email" name="applicant_email" required placeholder="you@example.com"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group mb-0"><label class="label">Phone</label><input class="form-input" name="applicant_phone" placeholder="+60XX-XXXXXXX"></div>
+      <div class="form-group mb-0"><label class="label">Resume (PDF/DOC)</label><input class="form-input" type="file" name="resume" accept=".pdf,.doc,.docx"></div>
+    </div>
+    <div class="form-group">
+      <label class="label">Cover Letter / Why you?</label>
+      <textarea class="form-input" name="cover_letter" rows="6" placeholder="Tell us about your experience, skills, and why you're a good fit for this role..."></textarea>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" type="submit">Submit Application</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

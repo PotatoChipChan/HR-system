@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Request – {{ req.position_title }}{% endblock %}
+{% block page_title %}Vacancy Request: {{ req.position_title }}{% endblock %}
+{% block content %}
+
+<div class="card fade-in" style="margin-bottom:20px">
+  <div style="display:flex;justify-content:space-between;align-items:start">
+    <div>
+      <p><strong>Department:</strong> {{ req.department_name }} &middot; <strong>Type:</strong> {{ req.employment_type }}</p>
+      <p><strong>Requested by:</strong> {{ req.requester_name }} &middot; <strong>Date:</strong> {{ req.created_at[:19] }}</p>
+      {% if req.min_salary %}<p><strong>Salary Range:</strong> RM{{ req.min_salary }}{% if req.max_salary %} – RM{{ req.max_salary }}{% endif %}{% endif %}</p>
+    </div>
+    <div>
+      <span class="badge {% if req.status=='Approved' %}badge-green{% elif req.status=='Rejected' %}badge-red{% else %}badge-blue{% endif %}" style="font-size:14px">{{ req.status }}</span>
+      {% if req.is_custom %}<span class="badge badge-gray" style="font-size:12px">Custom title</span>{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card fade-in" style="margin-bottom:20px">
+  <h4>Reason for Hiring</h4>
+  <p>{{ req.reason or 'No reason provided.' }}</p>
+  <h4>Description</h4>
+  <p>{{ req.description or 'No description.' }}</p>
+  <h4>Requirements</h4>
+  <p>{{ req.requirements or 'No requirements specified.' }}</p>
+</div>
+
+{% if req.status == 'Rejected' %}
+<div class="card fade-in" style="margin-bottom:20px;border-left:4px solid #a32d2d">
+  <h4 style="color:#a32d2d">Rejection Reason</h4>
+  <p>{{ req.rejection_reason }}</p>
+  {% if req.reviewer_name %}<p style="color:#888;font-size:13px">Reviewed by: {{ req.reviewer_name }} on {{ req.reviewed_at[:19] }}</p>{% endif %}
+</div>
+{% endif %}
+
+{% if req.status == 'Approved' and req.posting_id %}
+<div class="card fade-in" style="margin-bottom:20px;border-left:4px solid #1a6b3a">
+  <h4 style="color:#1a6b3a">Approved</h4>
+  <p>Posting created: <a href="{{ url_for('recruitment.view_posting', pid=req.posting_id) }}">{{ req.position_title }}</a></p>
+  {% if req.reviewer_name %}<p style="color:#888;font-size:13px">Reviewed by: {{ req.reviewer_name }} on {{ req.reviewed_at[:19] }}</p>{% endif %}
+</div>
+{% endif %}
+
+{% if session['user_role'] in ('Admin','HR','HR Manager','HR Director') and req.status == 'Pending' %}
+<div class="card fade-in" style="margin-bottom:20px">
+  <div class="sec-title">Review Request</div>
+
+  <form method="POST" action="{{ url_for('recruitment.approve_vacancy', rid=req.request_id) }}" style="margin-bottom:20px">
+    <h4 style="color:#1a6b3a">Approve</h4>
+    <div class="form-row">
+      <div class="form-group mb-0"><label class="label">Branch for this position *</label>
+        <select class="form-input" name="branch_id" id="branch_select" required>
+          <option value="">Select branch</option>
+        </select>
+      </div>
+    </div>
+    {% if req.is_custom %}
+    <div class="form-group" style="margin-bottom:12px">
+      <label style="font-size:13px;color:#333;font-weight:500">
+        <input type="checkbox" name="add_to_catalog" value="1"> Add "{{ req.position_title }}" to the position catalog (future requests can pick it directly)
+      </label>
+    </div>
+    {% endif %}
+    <button class="btn btn-success" type="submit">✅ Approve & Create Posting</button>
+  </form>
+
+  <form method="POST" action="{{ url_for('recruitment.reject_vacancy', rid=req.request_id) }}">
+    <h4 style="color:#a32d2d">Reject</h4>
+    <div class="form-group">
+      <textarea class="form-input" name="rejection_reason" rows="2" placeholder="Reason for rejection..." required></textarea>
+    </div>
+    <button class="btn btn-danger" type="submit">❌ Reject</button>
+  </form>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+{% if session['user_role'] in ('Admin','HR','HR Manager','HR Director') and req.status == 'Pending' %}
+<script>
+  // Load branch when department is known
+  document.addEventListener('DOMContentLoaded', function() {
+    var deptId = {{ req.department_id }};
+    fetch('/recruitment/_branches-for-dept/' + deptId)
+      .then(function(r) { return r.json(); })
+      .then(function(branches) {
+        var sel = document.getElementById('branch_select');
+        branches.forEach(function(b) {
+          var opt = document.createElement('option');
+          opt.value = b.branch_id;
+          opt.textContent = b.name;
+          sel.appendChild(opt);
+        });
+      });
+  });
+</script>
+{% endif %}
+{% endblock %}

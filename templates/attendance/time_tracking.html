@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Time Tracking{% endblock %}
+{% block page_title %}Time Tracking{% endblock %}
+
+{% block content %}
+<div class="metric-grid" style="margin-bottom:20px">
+  <div class="metric-card">
+    <div class="metric-label">Hours This Week</div>
+    <div class="metric-val green-val">{{ '%.1f'|format(stats.hrs or 0) }}h</div>
+    <div class="metric-sub">Target: 40h</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Overtime This Week</div>
+    <div class="metric-val" style="color:{% if (stats.ot or 0)>0 %}#a32d2d{% else %}var(--g600){% endif %}">{{ '%.1f'|format(stats.ot or 0) }}h</div>
+    <div class="metric-sub">Above 8h/day</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Role</div>
+    <div class="metric-val" style="font-size:16px">{{ session.user_role }}</div>
+    <div class="metric-sub">{{ session.dept_name }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Records Shown</div>
+    <div class="metric-val green-val">{{ recent|length }}</div>
+    <div class="metric-sub">Last 14 records</div>
+  </div>
+</div>
+
+<div class="{% if employees %}two-col{% endif %}">
+  <!-- My Records -->
+  <div class="card fade-in">
+    <div class="sec-title">My Timesheet</div>
+    {% if recent %}
+    <table class="tbl">
+      <thead><tr><th>Date</th><th>Check In</th><th>Check Out</th><th>Hours</th><th>OT</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for a in recent %}
+        <tr>
+          <td>{{ a.check_in[:10] }}</td>
+          <td>{{ a.check_in[11:16] }}</td>
+          <td>{{ a.check_out[11:16] if a.check_out else '<span class="badge badge-amber">Active</span>'|safe }}</td>
+          <td>{{ '%.1f'|format(a.hours_worked) if a.hours_worked else '—' }}h</td>
+          <td>{{ '%.1f'|format(a.overtime_hours) if a.overtime_hours else '0' }}h</td>
+          <td>
+            {% if a.status=='Approved' %}<span class="badge badge-green">Approved</span>
+            {% elif a.status=='Flagged' %}<span class="badge badge-red">Flagged</span>
+            {% else %}<span class="badge badge-amber">Pending</span>{% endif %}
+            {% if a.is_manual_entry %}<span class="badge badge-blue" style="font-size:9px;margin-left:4px">Manual</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><div class="icon">🕐</div><p>No attendance records</p></div>
+    {% endif %}
+  </div>
+
+  <!-- Team Overview (HR/Manager/Admin) -->
+  {% if employees %}
+  <div class="card fade-in">
+    <div class="sec-title">Team Overview (This Week)</div>
+    <table class="tbl">
+      <thead><tr><th>Employee</th><th>Dept</th><th>Hours</th><th>OT</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for t in employees %}
+        <tr>
+          <td>
+            <div style="font-weight:500;font-size:13px">{{ t.full_name }}</div>
+            <div style="font-size:11px;color:var(--text-secondary)">{{ t.position or '' }}</div>
+          </td>
+          <td>{{ t.department_name }}</td>
+          <td>{{ '%.1f'|format(t.total_hours or 0) }}h</td>
+          <td {% if (t.total_ot or 0)>4 %}style="color:#a32d2d;font-weight:600"{% endif %}>{{ '%.1f'|format(t.total_ot or 0) }}h</td>
+          <td>
+            {% if (t.total_ot or 0)>8 %}<span class="badge badge-red">Flagged</span>
+            {% elif t.present_today %}<span class="badge badge-green">Present</span>
+            {% else %}<span class="badge badge-gray">Absent</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="btn-row" style="margin-top:12px;margin-bottom:0">
+      {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+      <a class="btn btn-sm" href="{{ url_for('attendance.manual') }}">Manual Entry</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

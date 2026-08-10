@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Performance Review{% endblock %}
+{% block page_title %}{{ year }} Performance Review{% endblock %}
+
+{% block content %}
+<div class="card fade-in" style="margin-bottom:20px">
+  <div class="sec-title">
+    <span>Yearly Performance Review — {{ year }}</span>
+    <div style="display:flex;gap:8px;align-items:center">
+      <form method="GET" action="{{ url_for('performance.list_scores') }}" style="display:flex;gap:8px;align-items:center">
+        <select class="form-input" name="month" id="perf-month" style="width:130px">
+          <option value="" {{ 'selected' if not month }}>Yearly View</option>
+          {% for m in range(1,13) %}
+          <option value="{{ m }}" {{ 'selected' if m==month }}>Month {{ m }}</option>
+          {% endfor %}
+        </select>
+        <select class="form-input" name="year" id="perf-year" style="width:90px">
+          {% for y in [2025,2026,2027] %}
+          <option value="{{ y }}" {{ 'selected' if y==year }}>{{ y }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-sm btn-primary" type="submit">View</button>
+      </form>
+      <form method="POST" action="{{ url_for('performance.generate_scores') }}" style="display:inline">
+        <input type="hidden" name="month" id="gen-month" value="{{ month }}">
+        <input type="hidden" name="year" id="gen-year" value="{{ year }}">
+        <button class="btn btn-sm" type="submit">Generate Yearly Review</button>
+      </form>
+      <script>
+        document.getElementById('perf-month').onchange = function() {
+          document.getElementById('gen-month').value = this.value;
+        };
+        document.getElementById('perf-year').onchange = function() {
+          document.getElementById('gen-year').value = this.value;
+        };
+      </script>
+    </div>
+  </div>
+
+  <div class="info-box" style="background:var(--g50);border:1px solid var(--g200);border-radius:8px;padding:12px 16px;margin-bottom:16px;color:var(--text-secondary);font-size:13px">
+    <strong>How the yearly grade is calculated:</strong><br>
+    Composite = Attendance Rate × 40% + Punctuality × 30% + Overtime Score × 15% + Reliability × 15%<br>
+    Grades: A ≥ 85, B 70–84, C 55–69, D &lt; 55
+  </div>
+
+  {% if summary %}
+  <div class="metric-grid" style="margin-bottom:16px">
+    <div class="metric-card">
+      <div class="metric-label">Employees Reviewed</div>
+      <div class="metric-val green-val">{{ summary.count }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Avg Composite</div>
+      <div class="metric-val green-val">{{ summary.avg_score }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Avg Attendance</div>
+      <div class="metric-val green-val">{{ summary.avg_att }}%</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Avg Punctuality</div>
+      <div class="metric-val green-val">{{ summary.avg_punct }}%</div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if reviews %}
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>Employee</th>
+        {% if role != 'Manager' %}<th>Branch</th>{% endif %}
+        <th>Department</th>
+        <th>Attendance</th>
+        <th>Punctuality</th>
+        <th>OT Score</th>
+        <th>Reliability</th>
+        <th>Composite</th>
+        <th>Grade</th>
+        <th>Days Present</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in reviews %}
+      <tr>
+        <td><strong>{{ r.full_name }}</strong></td>
+        {% if role != 'Manager' %}<td>{{ r.branch_name or '—' }}</td>{% endif %}
+        <td>{{ r.department_name }}</td>
+        <td>{{ r.attendance_rate }}%</td>
+        <td>{{ r.punctuality }}%</td>
+        <td>{{ r.overtime_score }}%</td>
+        <td>{{ r.reliability }}%</td>
+        <td><strong>{{ r.composite_score }}</strong></td>
+        <td>
+          {% if r.grade == 'A' %}<span class="badge badge-green">A</span>
+          {% elif r.grade == 'B' %}<span class="badge badge-blue">B</span>
+          {% elif r.grade == 'C' %}<span class="badge badge-amber">C</span>
+          {% else %}<span class="badge badge-red">D</span>{% endif %}
+        </td>
+        <td>{{ r.days_present }} / {{ r.total_working_days }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon">📊</div>
+    <h3>No yearly review for {{ year }}</h3>
+    <p>Click "Generate Yearly Review" to calculate yearly performance for all active employees.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

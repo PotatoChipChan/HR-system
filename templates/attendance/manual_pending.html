@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Pending Manual Entries{% endblock %}
+{% block page_title %}Pending Manual Attendance Review{% endblock %}
+
+{% block content %}
+<div class="card fade-in">
+  <div class="sec-title">Self-Service Manual Entries Awaiting Review</div>
+  <div class="ai-panel" style="margin-bottom:20px">
+    <div class="ai-tag">⏳ Pending Approval</div>
+    <p style="font-size:12px;margin-top:4px">Employees who failed biometric check-in submitted these self-service entries. Approve or reject each one.</p>
+  </div>
+
+  {% if pending %}
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>Employee</th>
+        <th>Date / Time</th>
+        <th>Reason</th>
+        <th>Submitted</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in pending %}
+      <tr>
+        <td>
+          <strong>{{ p.full_name }}</strong><br>
+          <span style="font-size:11px;color:var(--text-secondary)">{{ p.position or 'N/A' }}</span>
+        </td>
+        <td>
+          {% if p.check_in %}
+            {{ p.check_in[:10] }}<br>
+            <span style="font-size:11px;color:var(--text-secondary)">{{ p.check_in[11:16] }}</span>
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td style="max-width:200px;font-size:12px">{{ p.manual_reason or '—' }}</td>
+        <td style="font-size:12px;color:var(--text-secondary)">
+          {% if p.created_at %}{{ p.created_at[:16] }}{% else %}—{% endif %}
+        </td>
+        <td>
+          <form method="POST" action="{{ url_for('attendance.manual_pending_review') }}" style="display:flex;gap:6px">
+            <input type="hidden" name="attendance_id" value="{{ p.attendance_id }}">
+            <button class="btn btn-sm btn-success" name="action" value="approve" type="submit">Approve</button>
+            <button class="btn btn-sm btn-danger" name="action" value="reject" type="submit">Reject</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon">✅</div>
+    <p>No pending manual entries.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

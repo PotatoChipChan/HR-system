@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Monthly Performance Breakdown{% endblock %}
+{% block page_title %}{{ month }}/{{ year }} Monthly Breakdown{% endblock %}
+
+{% block content %}
+<div class="card fade-in" style="margin-bottom:20px">
+  <div class="sec-title">
+    <span>Monthly Performance Breakdown — {{ month }}/{{ year }}</span>
+    <div style="display:flex;gap:8px;align-items:center">
+      <form method="GET" action="{{ url_for('performance.list_scores') }}" style="display:flex;gap:8px;align-items:center">
+        <select class="form-input" name="month" id="perf-month" style="width:130px">
+          {% for m in range(1,13) %}
+          <option value="{{ m }}" {{ 'selected' if m==month }}>Month {{ m }}</option>
+          {% endfor %}
+        </select>
+        <select class="form-input" name="year" id="perf-year" style="width:90px">
+          {% for y in [2025,2026,2027] %}
+          <option value="{{ y }}" {{ 'selected' if y==year }}>{{ y }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-sm btn-primary" type="submit">View</button>
+      </form>
+      <form method="POST" action="{{ url_for('performance.generate_scores') }}" style="display:inline">
+        <input type="hidden" name="month" id="gen-month" value="{{ month }}">
+        <input type="hidden" name="year" id="gen-year" value="{{ year }}">
+        <button class="btn btn-sm" type="submit">Generate Monthly Scores</button>
+      </form>
+      <a class="btn btn-sm btn-secondary" href="{{ url_for('performance.list_scores', year=year) }}">Back to Yearly</a>
+      <script>
+        document.getElementById('perf-month').onchange = function() {
+          document.getElementById('gen-month').value = this.value;
+        };
+        document.getElementById('perf-year').onchange = function() {
+          document.getElementById('gen-year').value = this.value;
+        };
+      </script>
+    </div>
+  </div>
+
+  <p style="color:var(--text-secondary);font-size:13px;margin-bottom:16px">
+    This is the monthly drill-down. The <strong>main grade</strong> is based on the yearly review, not a single month.
+  </p>
+
+  {% if scores %}
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>Employee</th>
+        <th>Department</th>
+        <th>Attendance</th>
+        <th>Punctuality</th>
+        <th>OT Score</th>
+        <th>Reliability</th>
+        <th>Composite</th>
+        <th>Grade</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in scores %}
+      <tr>
+        <td><strong>{{ s.full_name }}</strong></td>
+        <td>{{ s.department_name }}</td>
+        <td>{{ s.attendance_rate }}%</td>
+        <td>{{ s.punctuality }}%</td>
+        <td>{{ s.overtime_score }}%</td>
+        <td>{{ s.reliability }}%</td>
+        <td><strong>{{ s.composite_score }}</strong></td>
+        <td>
+          {% if s.grade == 'A' %}<span class="badge badge-green">A</span>
+          {% elif s.grade == 'B' %}<span class="badge badge-blue">B</span>
+          {% elif s.grade == 'C' %}<span class="badge badge-amber">C</span>
+          {% else %}<span class="badge badge-red">D</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon">📊</div>
+    <h3>No monthly scores for {{ month }}/{{ year }}</h3>
+    <p>Click "Generate Monthly Scores" to calculate monthly scores.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+{% block title %}{{ emp.full_name }}{% endblock %}
+{% block page_title %}Employee Profile{% endblock %}
+
+{% block content %}
+<div style="max-width:960px">
+
+<!-- Pending IC Access Requests (for employee viewing their own page) -->
+{% if pending_requests_for_me %}
+<div class="card fade-in" style="margin-bottom:20px;border-left:4px solid var(--warning-color);background:#fff9e6">
+  <div class="sec-title">Pending IC Access Requests</div>
+  {% for req in pending_requests_for_me %}
+  <div style="padding:16px;background:white;border:1px solid var(--border);border-radius:8px;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div>
+        <strong>{{ req.requester_name }}</strong> is requesting access to your IC document
+        {% if req.reason %}
+        <div style="color:var(--text-secondary);font-size:13px;margin-top:4px">Reason: {{ req.reason }}</div>
+        {% endif %}
+      </div>
+      <div style="display:flex;gap:8px">
+        <form method="POST" action="{{ url_for('employees.respond_to_ic_request', req_id=req.request_id, action='reject') }}">
+          <button class="btn btn-sm btn-danger" type="submit">Reject</button>
+        </form>
+        <form method="POST" action="{{ url_for('employees.respond_to_ic_request', req_id=req.request_id, action='approve') }}">
+          <button class="btn btn-sm btn-primary" type="submit">Approve (7 days)</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Header card -->
+<div class="card fade-in" style="margin-bottom:20px">
+  <div style="display:flex;align-items:center;gap:20px;padding-bottom:20px;border-bottom:1px solid var(--border);margin-bottom:20px">
+    <div class="avatar" style="width:72px;height:72px;font-size:24px">{{ emp.full_name[:2].upper() }}</div>
+    <div style="flex:1">
+      <div style="font-family:'Space Grotesk',sans-serif;font-size:20px;font-weight:700">{{ emp.full_name }}</div>
+      <div style="color:var(--text-secondary);font-size:13px;margin-top:4px">{{ emp.position or '—' }} · {{ emp.department_name }} · {{ emp.branch_name }}</div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        {% if emp.employment_status == 'Active' %}<span class="badge badge-green">Active</span>
+        {% elif emp.employment_status == 'On Leave' %}<span class="badge badge-amber">On Leave</span>
+        {% else %}<span class="badge badge-red">{{ emp.employment_status }}</span>{% endif %}
+        <span class="badge badge-blue">{{ emp.employment_type }}</span>
+        <span class="badge badge-gray">{{ emp.role_name }}</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] or (session.user_role == 'Manager' and emp.branch_id == session.branch_id) %}
+      <button class="btn btn-primary btn-sm" onclick="document.getElementById('editModal').classList.add('show')">Edit</button>
+      {% endif %}
+      {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+      <a class="btn btn-sm {% if has_face_registered %}btn-primary{% else %}btn{% endif %}"
+         href="{{ url_for('face.register_face_page', emp_id=emp.employee_id) }}">
+        {% if has_face_registered %}Re-register Face{% else %}Register Face{% endif %}
+      </a>
+      <form method="POST" action="{{ url_for('employees.deactivate_employee', emp_id=emp.employee_id) }}"
+            onsubmit="return confirm('Deactivate this employee?')">
+        <button class="btn btn-danger btn-sm" type="submit">Deactivate</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Details grid -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+    <div>
+      <div style="font-size:12px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Personal</div>
+      <div class="kv-grid">
+        <div class="kv-k">IC Number</div><div class="kv-v">{{ emp.ic_number or '—' }}</div>
+        <div class="kv-k">Date of Birth</div><div class="kv-v">{{ emp.date_of_birth or '—' }}</div>
+        <div class="kv-k">Gender</div><div class="kv-v">{{ emp.gender or '—' }}</div>
+        <div class="kv-k">Contact</div><div class="kv-v">{{ emp.contact_no or '—' }}</div>
+        <div class="kv-k">Email</div><div class="kv-v">{{ emp.email }}</div>
+        <div class="kv-k">Address</div><div class="kv-v">{{ emp.address or '—' }}</div>
+        {% if emp.id_document_path %}
+        <div class="kv-k">ID Document</div>
+        <div class="kv-v">
+          {% if session.user_id == emp.employee_id or has_ic_access %}
+            {% for path in emp.id_document_path.split(',') %}
+            <a href="{{ url_for('employees.view_id_document', emp_id=emp.employee_id, filename=path) }}" target="_blank" class="text-link" style="display:block;margin-bottom:4px">
+              📄 View Watermarked {{ 'Front' if 'front' in path else ('Back' if 'back' in path else 'Document') }}
+            </a>
+            {% endfor %}
+          {% else %}
+            <div style="color:var(--text-secondary);margin-bottom:8px">🔒 Access requires employee approval</div>
+            {% if pending_ic_request %}
+              <div style="color:var(--warning-color);font-weight:600">Request pending approval</div>
+            {% else %}
+              <form method="POST" action="{{ url_for('employees.request_ic_access', emp_id=emp.employee_id) }}">
+                <div class="form-group" style="margin-bottom:8px">
+                  <input type="text" name="reason" class="form-input" placeholder="Reason for access (optional)">
+                </div>
+                <button type="submit" class="btn btn-sm btn-primary">Request IC Access</button>
+              </form>
+            {% endif %}
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    <div>
+      <div style="font-size:12px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Employment</div>
+      <div class="kv-grid">
+        <div class="kv-k">Company</div><div class="kv-v">{{ emp.company_name }}</div>
+        <div class="kv-k">Hire Date</div><div class="kv-v">{{ emp.hire_date }}</div>
+        <div class="kv-k">Base Salary</div><div class="kv-v fw-600" style="color:var(--g600)">RM {{ '%.2f'|format(emp.base_salary) }}</div>
+        <div class="kv-k">Work Hours</div><div class="kv-v">{{ emp.work_start_time or '09:00' }} – {{ emp.work_end_time or '18:00' }}</div>
+        <div class="kv-k">Emergency</div><div class="kv-v">{{ emp.emergency_contact_name or '—' }} · {{ emp.emergency_contact_no or '' }}</div>
+        <div class="kv-k">Last Login</div><div class="kv-v">{{ emp.last_login or 'Never' }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Employment Contract -->
+<div class="card fade-in" style="margin-bottom:20px">
+  <div class="sec-title">📄 Employment Contract</div>
+  {% if employee_contract %}
+  <table class="tbl" style="margin-bottom:0">
+    <tr><th style="width:140px">Contract Ref</th><td>CTR-{{ '%04d'|format(employee_contract.contract_id) }}</td></tr>
+    {% if employee_contract.position %}<tr><th>Position</th><td>{{ employee_contract.position }}</td></tr>{% endif %}
+    {% if employee_contract.offer_date %}<tr><th>Offer Date</th><td>{{ employee_contract.offer_date }}</td></tr>{% endif %}
+    {% if employee_contract.start_date %}<tr><th>Start Date</th><td>{{ employee_contract.start_date }}</td></tr>{% endif %}
+    {% if employee_contract.base_salary %}<tr><th>Salary</th><td>RM {{ '%.2f'|format(employee_contract.base_salary) }}</td></tr>{% endif %}
+    {% if employee_contract.employment_type %}<tr><th>Type</th><td>{{ employee_contract.employment_type }}</td></tr>{% endif %}
+    <tr><th>Status</th><td><span class="badge {% if employee_contract.status=='Accepted' or employee_contract.status=='Signed' %}badge-green{% elif employee_contract.status=='Sent' %}badge-amber{% else %}badge-grey{% endif %}">{{ employee_contract.status }}</span></td></tr>
+    {% if employee_contract.signed_at %}<tr><th>Signed On</th><td>{{ employee_contract.signed_at }}</td></tr>{% endif %}
+    <tr><th>Documents</th>
+      <td style="display:flex;gap:12px;flex-wrap:wrap">
+        {% if employee_contract.contract_doc_path %}
+        <a class="btn btn-sm btn-secondary" href="{{ url_for('recruitment.download_contract', cid=employee_contract.contract_id) }}" target="_blank">📄 View Contract</a>
+        {% endif %}
+        {% if employee_contract.signed_doc_path %}
+        <a class="btn btn-sm btn-primary" href="{{ url_for('recruitment.download_signed_contract', cid=employee_contract.contract_id) }}" target="_blank">✍️ View Signed Contract</a>
+        {% endif %}
+        {% if not employee_contract.contract_doc_path and not employee_contract.signed_doc_path %}
+        <span style="color:var(--text-secondary)">No document on file</span>
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+  {% else %}
+  <div style="text-align:center;padding:32px 16px;color:var(--text-secondary)">
+    <div style="font-size:36px;margin-bottom:8px">📄</div>
+    <p style="margin:0">No employment contract found for this employee.</p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Leave Balances -->
+<div class="card fade-in" style="margin-bottom:20px">
+  <div class="sec-title">Leave Balances ({{ 'now'|replace('now','') }}2026)</div>
+  {% if leave_bal %}
+  <div class="leave-bal-grid">
+    {% for lb in leave_bal %}
+    <div class="leave-bal-card">
+      <div class="leave-bal-val">{{ (lb.entitled_days - lb.used_days - lb.pending_days)|int }}</div>
+      <div class="leave-bal-name">{{ lb.type_name }}</div>
+      <div class="text-muted">{{ lb.used_days|int }} used · {{ lb.pending_days|int }} pending</div>
+      <div class="prog" style="margin-top:8px">
+        <div class="prog-fill" style="width:{{ [100,(lb.used_days/lb.entitled_days*100)|int if lb.entitled_days else 0]|min }}%"></div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-muted">No leave balances set up yet.</div>
+  {% endif %}
+</div>
+
+<!-- Recent Attendance -->
+<div class="card fade-in">
+  <div class="sec-title">Recent Attendance</div>
+  {% if recent_att %}
+  <table class="tbl">
+    <thead><tr><th>Date</th><th>Check In</th><th>Check Out</th><th>Hours</th><th>OT</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for a in recent_att %}
+      <tr>
+        <td>{{ a.check_in[:10] }}</td>
+        <td>{{ a.check_in[11:16] }}</td>
+        <td>{{ a.check_out[11:16] if a.check_out else '—' }}</td>
+        <td>{{ '%.1f'|format(a.hours_worked) if a.hours_worked else '—' }}h</td>
+        <td>{{ '%.1f'|format(a.overtime_hours) if a.overtime_hours else '0' }}h</td>
+        <td>
+          {% if a.status=='Approved' %}<span class="badge badge-green">Approved</span>
+          {% elif a.status=='Flagged' %}<span class="badge badge-red">Flagged</span>
+          {% else %}<span class="badge badge-amber">Pending</span>{% endif %}
+          {% if a.is_manual_entry %}<span class="badge badge-blue" style="font-size:9px">Manual</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><div class="icon">🕐</div><p>No attendance records</p></div>
+  {% endif %}
+</div>
+</div>
+
+<!-- Edit Modal -->
+{% if session.user_role in ['Admin','HR Director','HR Manager','HR'] or (session.user_role == 'Manager' and emp.branch_id == session.branch_id) %}
+<div class="modal-backdrop" id="editModal">
+  <div class="modal-card">
+    <div class="modal-title">
+      Edit Employee
+      <button class="btn btn-sm" onclick="document.getElementById('editModal').classList.remove('show')">✕ Close</button>
+    </div>
+    <form method="POST" action="{{ url_for('employees.edit_employee', emp_id=emp.employee_id) }}">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Full Name</label><input class="form-input" name="full_name" value="{{ emp.full_name }}" required></div>
+        <div class="form-group"><label class="form-label">Contact No.</label><input class="form-input" name="contact_no" value="{{ emp.contact_no or '' }}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Gender</label>
+          <select class="form-input" name="gender">
+            <option value="Male" {% if emp.gender=='Male' %}selected{% endif %}>Male</option>
+            <option value="Female" {% if emp.gender=='Female' %}selected{% endif %}>Female</option>
+            <option value="Other" {% if emp.gender=='Other' %}selected{% endif %}>Other</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Position</label><input class="form-input" name="position" value="{{ emp.position or '' }}"></div>
+        <div class="form-group"><label class="form-label">Base Salary (RM)</label><input class="form-input" type="number" step="0.01" name="base_salary" value="{{ emp.base_salary }}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Employment Type</label>
+          <select class="form-input" name="employment_type">
+            <option {% if emp.employment_type=='Full-Time' %}selected{% endif %}>Full-Time</option>
+            <option {% if emp.employment_type=='Part-Time' %}selected{% endif %}>Part-Time</option>
+            <option {% if emp.employment_type=='Contract' %}selected{% endif %}>Contract</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Work Start Time</label><input class="form-input" type="time" name="work_start_time" value="{{ emp.work_start_time or '09:00' }}"></div>
+        <div class="form-group"><label class="form-label">Work End Time</label><input class="form-input" type="time" name="work_end_time" value="{{ emp.work_end_time or '18:00' }}"></div>
+      </div>
+        <div class="form-group">
+          <label class="form-label">Status</label>
+          <select class="form-input" name="employment_status">
+            <option {% if emp.employment_status=='Active' %}selected{% endif %}>Active</option>
+            <option {% if emp.employment_status=='On Leave' %}selected{% endif %}>On Leave</option>
+            <option {% if emp.employment_status=='Inactive' %}selected{% endif %}>Inactive</option>
+            <option {% if emp.employment_status=='Terminated' %}selected{% endif %}>Terminated</option>
+          </select>
+        </div>
+      </div>
+      <input type="hidden" name="branch_id" value="{{ emp.branch_id }}">
+      <input type="hidden" name="department_id" value="{{ emp.department_id }}">
+      <input type="hidden" name="role_id" value="{{ emp.role_id }}">
+      <div class="btn-row" style="margin-bottom:0">
+        <button class="btn btn-primary" type="submit">Save Changes</button>
+        <button class="btn" type="button" onclick="document.getElementById('editModal').classList.remove('show')">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

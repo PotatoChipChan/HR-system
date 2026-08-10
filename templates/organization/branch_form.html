@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Add Branch' if not branch else 'Edit Branch' }} | SmartHR{% endblock %}
+
+{% block page_title %}{{ 'Add Branch' if not branch else 'Edit Branch' }}{% endblock %}
+
+{% block content %}
+
+<div class="card shadow-sm" style="border: none;">
+  <div class="card-body p-5">
+    <form method="post" action="
+      {%- if branch %}
+        {{ url_for('organization.edit_branch', bid=branch.branch_id) }}
+      {%- else %}
+        {{ url_for('organization.add_branch') }}
+      {%- endif %}
+    " novalidate id="branchForm">
+
+      <!-- Hidden company_id for HR users -->
+      {% if session.user_role != 'Admin' %}
+        <input type="hidden" name="company_id" value="{{ companies[0].company_id if companies else '' }}">
+      {% endif %}
+
+      <!-- Section 1: Basic Information -->
+      <div class="mb-5">
+        <h5 class="mb-4 fw-bold">Basic Information</h5>
+        
+        <div class="row g-4">
+          <!-- Company Selection (Admin Only) -->
+          {% if session.user_role == 'Admin' %}
+          <div class="col-12">
+            <label for="company_id" class="form-label fw-500">Company <span class="text-danger fw-bold">*</span></label>
+            <select class="form-select form-select-lg" id="company_id" name="company_id" required>
+              <option value="">Select a company</option>
+              {% for c in companies %}
+                <option value="{{ c.company_id }}"
+                  {%- if branch and branch.company_id == c.company_id %} selected{% endif %}>
+                  {{ c.name }}
+                </option>
+              {% endfor %}
+            </select>
+            <div class="invalid-feedback d-block text-danger">Please select a company.</div>
+          </div>
+          {% endif %}
+
+          <!-- Branch Name -->
+          <div class="col-12">
+            <label for="name" class="form-label fw-500">Branch Name <span class="text-danger fw-bold">*</span></label>
+            <input type="text" class="form-control form-control-lg" id="name" name="name"
+                   value="{{ branch.name if branch else '' }}"
+                   placeholder="e.g. KL Headquarters"
+                   required
+                   minlength="2"
+                   maxlength="100">
+            <div class="invalid-feedback d-block text-danger">Branch name is required (2–100 characters).</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 2: Address Information -->
+      <div class="mb-5">
+        <h5 class="mb-4 fw-bold">Address Information</h5>
+        
+        <div class="row g-4">
+          <!-- Address Line 1 -->
+          <div class="col-12">
+            <label for="address_line1" class="form-label fw-500">Address Line 1 <span class="text-danger fw-bold">*</span></label>
+            <input type="text" class="form-control form-control-lg" id="address_line1" name="address_line1"
+                   value="{{ branch.address_line1 if branch else '' }}"
+                   placeholder="e.g. No. 12, Jalan Semarak"
+                   required
+                   maxlength="100">
+            <div class="invalid-feedback d-block text-danger">Street address is required.</div>
+          </div>
+
+          <!-- Address Line 2 -->
+          <div class="col-12">
+            <label for="address_line2" class="form-label fw-500">Address Line 2 (Optional)</label>
+            <input type="text" class="form-control form-control-lg" id="address_line2" name="address_line2"
+                   value="{{ branch.address_line2 if branch else '' }}"
+                   placeholder="e.g. Unit 5, Building A"
+                   maxlength="100">
+            <div class="form-text">Building name, unit number, or any additional details.</div>
+          </div>
+
+          <!-- City/Region -->
+          <div class="col-12">
+            <label for="city" class="form-label fw-500">City / Region <span class="text-danger fw-bold">*</span></label>
+            <input type="text" class="form-control form-control-lg" id="city" name="city"
+                   value="{{ branch.city if branch else '' }}"
+                   placeholder="e.g. Kuala Lumpur"
+                   required
+                   maxlength="50">
+            <div class="invalid-feedback d-block text-danger">City/Region is required.</div>
+          </div>
+
+          <!-- State -->
+          <div class="col-12">
+            <label for="state" class="form-label fw-500">State <span class="text-danger fw-bold">*</span></label>
+            <select class="form-select form-select-lg" id="state" name="state" required>
+              <option value="">Select a state</option>
+              <option value="Johor" {% if branch and branch.state == 'Johor' %}selected{% endif %}>Johor</option>
+              <option value="Kedah" {% if branch and branch.state == 'Kedah' %}selected{% endif %}>Kedah</option>
+              <option value="Kelantan" {% if branch and branch.state == 'Kelantan' %}selected{% endif %}>Kelantan</option>
+              <option value="Kuala Lumpur" {% if branch and branch.state == 'Kuala Lumpur' %}selected{% endif %}>Kuala Lumpur (Federal Territory)</option>
+              <option value="Labuan" {% if branch and branch.state == 'Labuan' %}selected{% endif %}>Labuan (Federal Territory)</option>
+              <option value="Malacca" {% if branch and branch.state == 'Malacca' %}selected{% endif %}>Malacca</option>
+              <option value="Negeri Sembilan" {% if branch and branch.state == 'Negeri Sembilan' %}selected{% endif %}>Negeri Sembilan</option>
+              <option value="Pahang" {% if branch and branch.state == 'Pahang' %}selected{% endif %}>Pahang</option>
+              <option value="Penang" {% if branch and branch.state == 'Penang' %}selected{% endif %}>Penang</option>
+              <option value="Perak" {% if branch and branch.state == 'Perak' %}selected{% endif %}>Perak</option>
+              <option value="Perlis" {% if branch and branch.state == 'Perlis' %}selected{% endif %}>Perlis</option>
+              <option value="Putrajaya" {% if branch and branch.state == 'Putrajaya' %}selected{% endif %}>Putrajaya (Federal Territory)</option>
+              <option value="Sabah" {% if branch and branch.state == 'Sabah' %}selected{% endif %}>Sabah</option>
+              <option value="Sarawak" {% if branch and branch.state == 'Sarawak' %}selected{% endif %}>Sarawak</option>
+              <option value="Selangor" {% if branch and branch.state == 'Selangor' %}selected{% endif %}>Selangor</option>
+              <option value="Terengganu" {% if branch and branch.state == 'Terengganu' %}selected{% endif %}>Terengganu</option>
+            </select>
+            <div class="invalid-feedback d-block text-danger">Please select a state.</div>
+          </div>
+
+          <!-- Postal Code -->
+          <div class="col-12">
+            <label for="postal_code" class="form-label fw-500">Postal Code <span class="text-danger fw-bold">*</span></label>
+            <input type="text" class="form-control form-control-lg" id="postal_code" name="postal_code"
+                   value="{{ branch.postal_code if branch else '' }}"
+                   placeholder="e.g. 50450"
+                   required
+                   pattern="^[0-9]{5}$"
+                   maxlength="5">
+            <div class="invalid-feedback d-block text-danger">Postal code must be 5 digits (e.g. 50450).</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 3: Contact & Management -->
+      <div class="mb-5">
+        <h5 class="mb-4 fw-bold">Contact & Management</h5>
+        
+        <div class="row g-4">
+          <!-- Contact Number -->
+          <div class="col-12">
+            <label for="contact_no" class="form-label fw-500">Contact Number</label>
+            <input type="tel" class="form-control form-control-lg" id="contact_no" name="contact_no"
+                   value="{{ branch.contact_no if branch else '' }}"
+                   placeholder="e.g. +603-2110 8888"
+                   pattern="^(\+?6?01[0-9]-?[0-9]{7,8}|0[0-9]{1,2}-?[0-9]{7,8})$">
+            <div class="invalid-feedback d-block text-danger">Enter a valid Malaysian phone number (e.g. +603-2110 8888 or 012-3456789).</div>
+            <div class="form-text">Optional. Format: +60 or 01x-xxxxxxx</div>
+          </div>
+
+          <!-- HR Manager -->
+          <div class="col-12">
+            <label for="hr_manager_id" class="form-label fw-500">HR Manager</label>
+            <select class="form-select form-select-lg" id="hr_manager_id" name="hr_manager_id">
+              <option value="">Not assigned</option>
+              {% for e in employees %}
+                <option value="{{ e.employee_id }}"
+                  {%- if branch and branch.hr_manager_id == e.employee_id %} selected{% endif %}>
+                  {{ e.full_name }}
+                </option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Optional. Assign a manager responsible for this branch.</div>
+          </div>
+
+          <!-- Parent Branch -->
+          <div class="col-12">
+            <label for="parent_branch_id" class="form-label fw-500">Parent Branch</label>
+            <select class="form-select form-select-lg" id="parent_branch_id" name="parent_branch_id">
+              <option value="">None (top-level branch)</option>
+              {% for p in parent_branches %}
+                <option value="{{ p.branch_id }}"
+                  {%- if branch and branch.parent_branch_id == p.branch_id %} selected{% endif %}>
+                  {{ p.name }}
+                </option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Optional. For hierarchical branch structures.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Form Actions -->
+      <div class="d-flex gap-3 mt-5 pt-4 border-top">
+        <button type="submit" class="btn btn-primary btn-lg px-5">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><path d="M13 4L6 11l-3-3"/></svg>
+          {{ 'Update Branch' if branch else 'Save Branch' }}
+        </button>
+        <a href="{{ url_for('organization.branches') }}" class="btn btn-secondary btn-lg px-5">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+  .form-control-lg, .form-select-lg {
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    border-radius: 0.375rem;
+  }
+  
+  .fw-500 {
+    font-weight: 500;
+  }
+  
+  .invalid-feedback {
+    color: #dc3545;
+    font-weight: 500;
+    font-size: 0.875rem;
+    margin-top: 0.5rem;
+  }
+  
+  .form-text {
+    color: #6c757d;
+    font-size: 0.875rem;
+  }
+  
+  .was-validated .form-control:invalid,
+  .was-validated .form-select:invalid {
+    border-color: #dc3545;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' width='12' height='12' fill='none' stroke='%23dc3545'%3e%3ccircle cx='6' cy='6' r='4.5'/%3e%3cpath fill='%23dc3545' d='M8 4a.5.5 0 0 0-.854-.354L6.5 4.793 5.354 3.646A.5.5 0 1 0 4.5 4.5L5.793 5.854 4.646 7.146a.5.5 0 1 0 .708.708l1.146-1.147 1.146 1.147a.5.5 0 0 0 .708-.708L6.207 5.854 7.354 4.5a.5.5 0 0 0 .146-.5z'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right calc(0.375em + 0.1875rem) center;
+    background-size: calc(0.75em + 0.375rem) calc(0.75em + 0.375rem);
+    padding-right: calc(1.5em + 0.75rem);
+  }
+  
+  .was-validated .form-control:valid,
+  .was-validated .form-select:valid {
+    border-color: #198754;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3e%3cpath fill='%23198754' d='M2.3 6.73L.6 4.53c-.4-1.04.46-1.4 1.1-.8l1.1 1.4 3.4-3.8c.6-.63 1.6-.27 1.2.7l-4 4.6c-.43.5-.8.4-1.1.1z'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right calc(0.375em + 0.1875rem) center;
+    background-size: calc(0.75em + 0.375rem) calc(0.75em + 0.375rem);
+    padding-right: calc(1.5em + 0.75rem);
+  }
+</style>
+
+<script>
+  // Bootstrap 5 validation – prevents form submission if invalid
+  (function () {
+    'use strict'
+    const form = document.getElementById('branchForm');
+    
+    // Real-time validation feedback
+    form.querySelectorAll('.form-control, .form-select').forEach(field => {
+      field.addEventListener('change', function () {
+        this.classList.add('was-validated');
+      });
+      
+      field.addEventListener('blur', function () {
+        this.classList.add('was-validated');
+      });
+    });
+    
+    form.addEventListener('submit', function (event) {
+      if (!form.checkValidity()) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      form.classList.add('was-validated');
+    }, false);
+  })();
+</script>
+
+{% endblock %}

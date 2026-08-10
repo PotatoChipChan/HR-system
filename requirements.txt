@@ -1,0 +1,17 @@
+flask
+werkzeug
+pillow
+easyocr
+pytesseract
+opencv-python-headless
+numpy
+reportlab
+PyPDF2
+pdfplumber
+cryptography
+requests
+Flask-Mail
+nltk
+python-dotenv
+face_recognition
+setuptools

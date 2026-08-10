@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Audit Log{% endblock %}
+{% block page_title %}System Audit Log{% endblock %}
+
+{% block content %}
+<div class="metric-grid">
+  <div class="metric-card"><div class="metric-label">Events Today</div><div class="metric-val green-val">{{ today_stats.total or 0 }}</div><div class="metric-sub">All modules</div></div>
+  <div class="metric-card"><div class="metric-label">Failed Actions</div><div class="metric-val" style="color:#a32d2d">{{ today_stats.failed or 0 }}</div><div class="metric-sub">Flagged for review</div></div>
+  <div class="metric-card"><div class="metric-label">Total Records</div><div class="metric-val green-val">{{ total }}</div><div class="metric-sub">Matching filter</div></div>
+  <div class="metric-card"><div class="metric-label">Pages</div><div class="metric-val">{{ total_pages }}</div><div class="metric-sub">{{ page }}/{{ total_pages }}</div></div>
+</div>
+
+<div class="card fade-in section-gap">
+  <div class="sec-title">Filter Audit Logs</div>
+  <form method="GET" action="{{ url_for('audit.index') }}">
+    <div class="filter-bar">
+      <select name="module" class="form-input" onchange="this.form.submit()">
+        <option value="">All Modules</option>
+        {% for m in modules %}<option value="{{ m.module_name }}" {% if module==m.module_name %}selected{% endif %}>{{ m.module_name }}</option>{% endfor %}
+      </select>
+      <select name="action" class="form-input" onchange="this.form.submit()">
+        <option value="">All Actions</option>
+        {% for a in actions %}<option value="{{ a.action }}" {% if action==a.action %}selected{% endif %}>{{ a.action }}</option>{% endfor %}
+      </select>
+      <select name="status" class="form-input" onchange="this.form.submit()">
+        <option value="">All Status</option>
+        <option value="Success" {% if status=='Success' %}selected{% endif %}>Success</option>
+        <option value="Failed"  {% if status=='Failed'  %}selected{% endif %}>Failed</option>
+      </select>
+      <input class="form-input" type="date" name="from" value="{{ date_from }}" onchange="this.form.submit()">
+      <input class="form-input" type="date" name="to"   value="{{ date_to }}"   onchange="this.form.submit()">
+      <input class="form-input" type="text" name="q" value="{{ search }}" placeholder="Search…" style="min-width:160px">
+      <button class="btn btn-primary btn-sm" type="submit">Search</button>
+      <a class="btn btn-sm" href="{{ url_for('audit.index') }}">Reset</a>
+    </div>
+  </form>
+</div>
+
+<div class="card fade-in">
+  <div class="sec-title">Audit Trail</div>
+  {% if logs %}
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>Timestamp</th><th>Actor</th><th>Module</th><th>Action</th>
+        <th>Description</th><th>Status</th><th>IP</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
+      <tr class="row-click" onclick="openModal(this)"
+          data-id="{{ log.audit_log_id }}"
+          data-ts="{{ log.created_at }}"
+          data-actor="{{ log.full_name or 'System' }}"
+          data-module="{{ log.module_name }}"
+          data-action="{{ log.action }}"
+          data-desc="{{ log.description or '' }}"
+          data-target="{{ log.target_table or '' }}/{{ log.target_record_id or '' }}"
+          data-status="{{ log.action_status }}"
+          data-ip="{{ log.ip_address or '' }}"
+          data-ua="{{ log.user_agent or '' }}"
+          data-details="{{ log.action_details or '{}' }}">
+        <td style="font-size:12px;font-family:monospace;white-space:nowrap">{{ log.created_at[:19] }}</td>
+        <td>{{ log.full_name or 'System' }}</td>
+        <td><span class="badge badge-blue">{{ log.module_name }}</span></td>
+        <td style="font-family:monospace;font-size:12px">{{ log.action }}</td>
+        <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ log.description or '—' }}</td>
+        <td>
+          {% if log.action_status=='Success' %}<span class="badge badge-green">Success</span>
+          {% else %}<span class="badge badge-red">Failed</span>{% endif %}
+        </td>
+        <td style="font-size:11px;color:var(--text-secondary)">{{ log.ip_address or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <!-- Pagination -->
+  <div class="pagination">
+    {% if page > 1 %}
+    <a class="page-btn" href="?page={{ page-1 }}&module={{ module }}&status={{ status }}&from={{ date_from }}&to={{ date_to }}&q={{ search }}">← Prev</a>
+    {% endif %}
+    {% for p in range(1, total_pages+1) %}
+    <a class="page-btn {% if p==page %}active{% endif %}"
+       href="?page={{ p }}&module={{ module }}&status={{ status }}&from={{ date_from }}&to={{ date_to }}&q={{ search }}">{{ p }}</a>
+    {% endfor %}
+    {% if page < total_pages %}
+    <a class="page-btn" href="?page={{ page+1 }}&module={{ module }}&status={{ status }}&from={{ date_from }}&to={{ date_to }}&q={{ search }}">Next →</a>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="empty-state"><div class="icon">🔍</div><h3>No logs found</h3><p>Try adjusting filters.</p></div>
+  {% endif %}
+</div>
+
+<!-- Detail Modal -->
+<div class="modal-backdrop" id="auditModal">
+  <div class="modal-card">
+    <div class="modal-title">Audit Log Details <button class="btn btn-sm" onclick="document.getElementById('auditModal').classList.remove('show')">✕</button></div>
+    <div class="kv-grid" id="modal-body"></div>
+    <div style="margin-top:14px;font-size:12px;font-weight:600;color:var(--text-secondary)">action_details</div>
+    <div id="modal-details" style="background:var(--bg-secondary);border-radius:12px;padding:12px;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;margin-top:6px"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openModal(row){
+  const d = row.dataset;
+  document.getElementById('modal-body').innerHTML = `
+    <div class="kv-k">Audit ID</div><div class="kv-v">#${d.id}</div>
+    <div class="kv-k">Timestamp</div><div class="kv-v">${d.ts}</div>
+    <div class="kv-k">Actor</div><div class="kv-v">${d.actor}</div>
+    <div class="kv-k">Module</div><div class="kv-v">${d.module}</div>
+    <div class="kv-k">Action</div><div class="kv-v">${d.action}</div>
+    <div class="kv-k">Description</div><div class="kv-v">${d.desc}</div>
+    <div class="kv-k">Target</div><div class="kv-v">${d.target}</div>
+    <div class="kv-k">Status</div><div class="kv-v">${d.status}</div>
+    <div class="kv-k">IP Address</div><div class="kv-v">${d.ip}</div>
+    <div class="kv-k">User Agent</div><div class="kv-v" style="font-size:11px">${d.ua}</div>
+  `;
+  try{ document.getElementById('modal-details').textContent = JSON.stringify(JSON.parse(d.details),null,2); }
+  catch(e){ document.getElementById('modal-details').textContent = d.details; }
+  document.getElementById('auditModal').classList.add('show');
+}
+document.getElementById('auditModal').addEventListener('click',function(e){if(e.target===this)this.classList.remove('show')});
+</script>
+{% endblock %}

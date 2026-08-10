@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Careers | SmartHR</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #1a6b3a;
+      --primary-dark: #145a2f;
+      --primary-light: #e8f5e9;
+      --text: #1a1a2e;
+      --text-secondary: #555;
+      --bg: #f8f9fa;
+      --card-bg: #ffffff;
+      --border: #e0e0e0;
+      --radius: 12px;
+      --shadow: 0 2px 12px rgba(0,0,0,0.08);
+      --max-width: 1000px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Header ── */
+    .site-header {
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 0;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    }
+    .header-inner {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header-logo {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--primary);
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header-logo svg { flex-shrink: 0; }
+    .header-tagline { color: var(--text-secondary); font-size: 14px; }
+
+    /* ── Hero ── */
+    .hero {
+      background: linear-gradient(135deg, var(--primary) 0%, #0d4a25 100%);
+      color: #fff;
+      padding: 72px 24px 60px;
+      text-align: center;
+    }
+    .hero h1 {
+      font-size: clamp(28px, 5vw, 42px);
+      font-weight: 800;
+      margin-bottom: 12px;
+    }
+    .hero p {
+      font-size: clamp(16px, 2.5vw, 19px);
+      opacity: 0.9;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .hero-meta {
+      display: flex;
+      gap: 32px;
+      justify-content: center;
+      margin-top: 28px;
+      flex-wrap: wrap;
+    }
+    .hero-stat { text-align: center; }
+    .hero-stat .num { font-size: 32px; font-weight: 700; }
+    .hero-stat .label { font-size: 13px; opacity: 0.8; margin-top: 2px; }
+
+    /* ── Main Content ── */
+    .main-content {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+    .section-title {
+      font-size: 26px;
+      font-weight: 700;
+      margin-bottom: 24px;
+      color: var(--text);
+    }
+    .section-subtitle {
+      color: var(--text-secondary);
+      font-size: 15px;
+      margin-bottom: 28px;
+      margin-top: -16px;
+    }
+
+    /* ── Job Cards ── */
+    .job-grid {
+      display: grid;
+      gap: 20px;
+    }
+    .job-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      transition: box-shadow 0.2s, transform 0.2s;
+      box-shadow: var(--shadow);
+    }
+    .job-card:hover {
+      box-shadow: 0 6px 24px rgba(0,0,0,0.12);
+      transform: translateY(-2px);
+    }
+    .job-card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .job-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 10px;
+    }
+    .job-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .job-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 13px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      background: var(--primary-light);
+      color: var(--primary-dark);
+      font-weight: 500;
+    }
+    .job-desc {
+      color: var(--text-secondary);
+      font-size: 14px;
+      line-height: 1.7;
+      margin-bottom: 16px;
+    }
+    .job-card .btn-apply {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      padding: 10px 24px;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.2s;
+    }
+    .job-card .btn-apply:hover { background: var(--primary-dark); }
+
+    /* ── Empty State ── */
+    .empty-state {
+      text-align: center;
+      padding: 64px 24px;
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+    }
+    .empty-state h3 { color: var(--text-secondary); font-size: 19px; margin-bottom: 8px; }
+    .empty-state p { color: #888; font-size: 14px; }
+
+    /* ── Footer ── */
+    .site-footer {
+      background: #1a1a2e;
+      color: #aaa;
+      padding: 32px 24px;
+      text-align: center;
+      font-size: 13px;
+    }
+    .site-footer .company-name { color: #fff; font-weight: 600; margin-bottom: 4px; }
+
+    /* ── Responsive ── */
+    @media (max-width: 640px) {
+      .hero { padding: 48px 16px 40px; }
+      .hero-meta { gap: 20px; }
+      .job-card { padding: 20px; }
+      .job-card-top { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="site-header">
+  <div class="header-inner">
+    <a class="header-logo" href="{{ url_for('recruitment.careers') }}">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+        <rect width="32" height="32" rx="8" fill="#1a6b3a"/>
+        <text x="16" y="22" text-anchor="middle" fill="#fff" font-size="18" font-weight="700" font-family="sans-serif">S</text>
+      </svg>
+      {{ company.name if company else 'SmartHR' }}
+    </a>
+    <span class="header-tagline">Building the future, together</span>
+  </div>
+</header>
+
+<!-- Hero -->
+<section class="hero">
+  <h1>Join Our Team</h1>
+  <p>We are looking for talented individuals who are passionate about making a difference. Explore our open positions below.</p>
+  <div class="hero-meta">
+    <div class="hero-stat">
+      <div class="num">{{ open_count }}</div>
+      <div class="label">Open Positions</div>
+    </div>
+    <div class="hero-stat">
+      <div class="num">{{ postings|length }}</div>
+      <div class="label">Departments Hiring</div>
+    </div>
+  </div>
+</section>
+
+<!-- Job Listings -->
+<div class="main-content">
+  <h2 class="section-title">{{ "Open Positions" if postings else "No Open Positions" }}</h2>
+  {% if postings %}
+  <p class="section-subtitle">Click <strong>Apply Now</strong> on any position — your email client will open with a pre-filled application template. Fill in your details and attach your CV.</p>
+
+  <div class="job-grid">
+    {% for p in postings %}
+    <article class="job-card">
+      <div class="job-card-top">
+        <div>
+          <h3 class="job-title">{{ p.title }}</h3>
+          <div class="job-meta">
+            <span class="job-tag">{{ p.department_name }}</span>
+            <span class="job-tag">{{ p.branch_name }}</span>
+            <span class="job-tag">{{ p.employment_type }}</span>
+            {% if p.min_salary %}
+            <span class="job-tag">RM{{ p.min_salary }}{% if p.max_salary %}–RM{{ p.max_salary }}{% endif %}</span>
+            {% endif %}
+          </div>
+          <p class="job-desc">{{ p.description[:200] if p.description else '' }}{% if p.description and p.description|length > 200 %}...{% endif %}</p>
+        </div>
+      </div>
+      <a class="btn-apply" href="mailto:{{ apply_email }}?subject=Application for {{ p.title|urlencode }}&body=Name:%0D%0APosition: {{ p.title|urlencode }}%0D%0AEmail:%0D%0AIC:%0D%0APhone:%0D%0AAddress:%0D%0A%0D%0A[Attach your CV and write your cover letter below]%0D%0A%0D%0A---%0D%0A[Ref: POST-{{ p.posting_id }}]">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l6 5 6-5M3 3h10a1 1 0 011 1v8a1 1 0 01-1 1H3a1 1 0 01-1-1V4a1 1 0 011-1z"/></svg>
+        Apply Now
+      </a>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <h3>No open positions at the moment</h3>
+    <p>Check back soon or follow us on LinkedIn for future opportunities.</p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Footer -->
+<footer class="site-footer">
+  <div class="company-name">{{ company.name if company else 'SmartHR' }}</div>
+  {% if company %}<div>{{ company.address or '' }}</div>{% endif %}
+  <div style="margin-top:4px">&copy; {{ current_year }} {{ company.name if company else 'SmartHR' }}. All rights reserved.</div>
+</footer>
+
+</body>
+</html>

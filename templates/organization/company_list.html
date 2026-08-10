@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}Companies | SmartHR{% endblock %}
+
+{% block page_title %}Companies{% endblock %}
+
+{% block content %}
+
+<div class="card fade-in">
+  <div class="sec-title">
+    Company Directory
+    <div style="display:flex;gap:8px">
+    </div>
+  </div>
+
+  {% if companies %}
+  <table class="tbl" id="companyTable">
+    <thead>
+      <tr>
+        <th>Company Name</th>
+        <th>Address</th>
+        <th>Contact</th>
+        <th>Email</th>
+        <th>Branches</th>
+        <th>Employees</th>
+        <th style="text-align:right">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in companies %}
+      <tr>
+        <td>
+          <div style="font-weight:600">{{ c.name }}</div>
+        </td>
+        <td title="{{ c.address }}">{{ c.address|truncate(40) if c.address else '—' }}</td>
+        <td>{{ c.contact_no or '—' }}</td>
+        <td>{{ c.email or '—' }}</td>
+        <td>
+          <span class="badge badge-green">{{ c.branch_count }}</span>
+        </td>
+        <td>
+          <span class="badge badge-blue">{{ c.employee_count }}</span>
+        </td>
+        <td>
+          <div class="btn-row" style="margin-bottom:0;gap:4px;justify-content:flex-end">
+            <a href="{{ url_for('organization.edit_company', cid=c.company_id) }}" class="btn btn-sm" title="Edit">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.5 2.5l2 2L5 13l-3 1 1-3 8.5-8.5z"/></svg>
+            </a>
+            {% if session.user_role == 'Admin' %}
+            <button type="button" class="btn btn-sm btn-outline-danger delete-btn"
+                    data-company-id="{{ c.company_id }}"
+                    data-company-name="{{ c.name }}"
+                    title="Delete">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10M6 4V3a1 1 0 011-1h2a1 1 0 011 1v1M5 4l1 9h4l1-9"/></svg>
+            </button>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="text-muted" style="margin-top:12px">Showing {{ companies|length }} company(ies)</div>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon">🏢</div>
+    <h3>No companies found</h3>
+  </div>
+  {% endif %}
+</div>
+
+<!-- ======= SINGLE DELETE MODAL ======= -->
+<div class="modal-backdrop" id="deleteModal">
+  <div class="modal-card">
+    <div class="modal-title">
+      <span>Confirm Deletion</span>
+      <button type="button" class="btn btn-sm" onclick="document.getElementById('deleteModal').classList.remove('show')">✕</button>
+    </div>
+    <form id="deleteForm" method="post">
+      <div style="margin-bottom: 20px;">
+        <p>Are you sure you want to delete company <strong id="deleteCompanyName"></strong>?</p>
+        <p class="text-danger" style="margin-top: 10px;">This action cannot be undone and is only allowed if the company has no branches or employees.</p>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+        <button type="button" class="btn" onclick="document.getElementById('deleteModal').classList.remove('show')">Cancel</button>
+        <button type="submit" class="btn btn-danger">Delete</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const deleteModal = document.getElementById('deleteModal');
+    const deleteForm = document.getElementById('deleteForm');
+    let currentCompanyId = null;
+    
+    // Add click listeners to all delete buttons
+    const deleteButtons = document.querySelectorAll('button.delete-btn');
+    
+    deleteButtons.forEach(button => {
+      button.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        currentCompanyId = this.getAttribute('data-company-id');
+        const companyName = this.getAttribute('data-company-name');
+        
+        document.getElementById('deleteCompanyName').textContent = companyName || 'this company';
+        deleteModal.classList.add('show');
+      });
+    });
+
+    // Handle form submission
+    deleteForm.addEventListener('submit', function (event) {
+      event.preventDefault();
+      
+      if (currentCompanyId) {
+        deleteForm.action = "{{ url_for('organization.delete_company', cid=0) }}".replace('0', currentCompanyId);
+        deleteForm.submit();
+      } else {
+        alert('Error: Company ID not found. Please try again.');
+      }
+    });
+  });
+</script>
+{% endblock %}

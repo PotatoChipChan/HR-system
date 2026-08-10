@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Bulk Schedule Interviews{% endblock %}
+{% block page_title %}Bulk Interview Scheduling{% endblock %}
+{% block content %}
+<div class="card fade-in" style="max-width:800px;margin:0 auto">
+  <p style="color:#555;margin-bottom:16px">Select a job posting and configure the interview slots. Time slots will be auto-assigned to all shortlisted candidates.</p>
+  <form method="POST" id="bulk-form">
+    <div class="form-group">
+      <label class="label">Job Posting *</label>
+      <select class="form-input" name="posting_id" id="posting_select" required>
+        <option value="">Select a posting with shortlisted candidates</option>
+        {% for p in postings %}
+        <option value="{{ p.posting_id }}" {{ 'selected' if request.args.get('pid')==p.posting_id|string }}>{{ p.title }} ({{ p.candidate_count }} shortlisted)</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div id="candidate-list" style="display:none;margin-bottom:16px;padding:12px;background:#f8faf8;border-radius:6px;border:1px solid var(--border)">
+      <strong style="font-size:14px">Candidates to schedule:</strong>
+      <ul id="candidate-names" style="margin:8px 0 0;font-size:13px;color:#555"></ul>
+    </div>
+    <div class="form-row">
+      <div class="form-group mb-0"><label class="label">Interview Date *</label><input class="form-input" name="date" type="date" required></div>
+      <div class="form-group mb-0"><label class="label">Start Time *</label><input class="form-input" name="start_time" type="time" value="09:00" required></div>
+      <div class="form-group mb-0"><label class="label">Duration per Slot (min)</label><input class="form-input" name="duration" type="number" value="30" min="15" step="5"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group mb-0"><label class="label">Interview Type</label>
+        <select class="form-input" name="type">
+          <option value="In-Person">In-Person</option>
+          <option value="Online">Online</option>
+          <option value="Phone">Phone</option>
+        </select>
+      </div>
+      <div class="form-group mb-0"><label class="label">Venue</label><input class="form-input" name="location" placeholder="Room name or address"></div>
+    </div>
+    <div class="form-group">
+      <label class="label">Meeting Link</label><input class="form-input" name="meeting_link" placeholder="https://">
+    </div>
+    <div class="form-group">
+      <label class="label">Interviewer(s)</label>
+      <select class="form-input" name="interviewer_ids" multiple style="min-height:80px">
+        {% for iv in interviewers %}
+        <option value="{{ iv.employee_id }}">{{ iv.full_name }} ({{ iv.role_name }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" type="submit">Schedule All & Send Emails</button>
+      <a href="{{ url_for('recruitment.list_interviews') }}" class="btn">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('posting_select').addEventListener('change', function() {
+  var pid = this.value;
+  var container = document.getElementById('candidate-list');
+  var list = document.getElementById('candidate-names');
+  if (!pid) { container.style.display = 'none'; return; }
+  fetch('/recruitment/_shortlisted-for-posting/' + pid)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      list.innerHTML = '';
+      if (data.length === 0) {
+        container.style.display = 'none';
+        return;
+      }
+      data.forEach(function(c) {
+        var li = document.createElement('li');
+        li.textContent = c.applicant_name + ' (' + c.applicant_email + ')';
+        list.appendChild(li);
+      });
+      container.style.display = 'block';
+    });
+});
+{% if request.args.get('pid') %}
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('posting_select').dispatchEvent(new Event('change'));
+});
+{% endif %}
+</script>
+{% endblock %}

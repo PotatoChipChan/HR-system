@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}Departments | SmartHR{% endblock %}
+
+{% block page_title %}Departments{% endblock %}
+
+{% block content %}
+
+<div class="card fade-in">
+  <div class="sec-title">
+    Department Directory
+    <div style="display:flex;gap:8px">
+      <a href="{{ url_for('organization.add_department') }}" class="btn btn-primary btn-sm">
+        + Add Department
+      </a>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <form method="get" action="{{ url_for('organization.departments') }}">
+    <div class="filter-bar">
+      <select name="branch_id" class="form-input" onchange="this.form.submit()">
+        <option value="">Branch: All Branches</option>
+        {% for b in branches %}
+          <option value="{{ b.branch_id }}" {% if current_branch == b.branch_id %}selected{% endif %}>
+            {{ b.name }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+
+  {% if departments %}
+  <table class="tbl" id="departmentTable">
+    <thead>
+      <tr>
+        <th>Department Name</th>
+        <th>Branch</th>
+        <th>Manager</th>
+        <th>Employees</th>
+        <th style="text-align:right">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in departments %}
+      <tr>
+        <td>
+          <div style="font-weight:600">{{ d.department_name }}</div>
+        </td>
+        <td>
+          <span class="badge badge-gray">{{ d.branch_name }}</span>
+        </td>
+        <td>
+          {% if d.manager_name %}{{ d.manager_name }}{% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td>
+          <span class="badge badge-blue">{{ d.emp_count or 0 }}</span>
+        </td>
+        <td>
+          <div class="btn-row" style="margin-bottom:0;gap:4px;justify-content:flex-end">
+            <a href="{{ url_for('organization.edit_department', did=d.department_id) }}" class="btn btn-sm" title="Edit">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.5 2.5l2 2L5 13l-3 1 1-3 8.5-8.5z"/></svg>
+            </a>
+            <button type="button" class="btn btn-sm btn-outline-danger delete-btn"
+                    data-dept-id="{{ d.department_id }}"
+                    data-dept-name="{{ d.department_name }}"
+                    title="Delete">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10M6 4V3a1 1 0 011-1h2a1 1 0 011 1v1M5 4l1 9h4l1-9"/></svg>
+            </button>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="text-muted" style="margin-top:12px">Showing {{ departments|length }} department(s)</div>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon">🏢</div>
+    <h3>No departments found</h3>
+    {% if branches %}
+      <p>Get started by <a href="{{ url_for('organization.add_department') }}">adding a department</a>.</p>
+    {% else %}
+      <p>Please <a href="{{ url_for('organization.branches') }}">add a branch</a> first.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- ======= SINGLE DELETE MODAL ======= -->
+<div class="modal-backdrop" id="deleteModal">
+  <div class="modal-card">
+    <div class="modal-title">
+      <span>Confirm Deletion</span>
+      <button type="button" class="btn btn-sm" onclick="document.getElementById('deleteModal').classList.remove('show')">✕</button>
+    </div>
+    <form id="deleteForm" method="post">
+      <div style="margin-bottom: 20px;">
+        <p>Are you sure you want to delete department <strong id="deleteDeptName"></strong>?</p>
+        <p class="text-danger" style="margin-top: 10px;">This action cannot be undone and is only allowed if no active employees are assigned to this department.</p>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+        <button type="button" class="btn" onclick="document.getElementById('deleteModal').classList.remove('show')">Cancel</button>
+        <button type="submit" class="btn btn-danger">Delete</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const deleteModal = document.getElementById('deleteModal');
+    const deleteForm = document.getElementById('deleteForm');
+    let currentDeptId = null;
+    
+    // Add click listeners to all delete buttons
+    const deleteButtons = document.querySelectorAll('button.delete-btn');
+    
+    deleteButtons.forEach(button => {
+      button.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        currentDeptId = this.getAttribute('data-dept-id');
+        const deptName = this.getAttribute('data-dept-name');
+        
+        document.getElementById('deleteDeptName').textContent = deptName || 'this department';
+        deleteModal.classList.add('show');
+      });
+    });
+
+    // Handle form submission
+    deleteForm.addEventListener('submit', function (event) {
+      event.preventDefault();
+      
+      if (currentDeptId) {
+        deleteForm.action = "{{ url_for('organization.delete_department', did=0) }}".replace('0', currentDeptId);
+        deleteForm.submit();
+      } else {
+        alert('Error: Department ID not found. Please try again.');
+      }
+    });
+  });
+</script>
+{% endblock %}

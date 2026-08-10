@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Applications (Internal){% endblock %}
+{% block page_title %}Applications (Internal){% endblock %}
+{% block content %}
+<div class="card fade-in">
+  <div class="sec-title">
+    Internal Vacancy Requests
+    <div>
+      {% if session['user_role'] in ('Admin','Manager', 'HR Manager', 'HR Director') or session.get('is_dept_manager') %}
+      <a href="{{ url_for('recruitment.vacancy_request') }}" class="btn btn-sm btn-primary">+ New Request</a>
+      {% endif %}
+    </div>
+  </div>
+  {% if requests %}
+  <table class="tbl">
+    <thead>
+      <tr><th>Position</th><th>Department</th><th>Requested By</th><th>Date</th><th>Status</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for r in requests %}
+      <tr>
+        <td><strong>{{ r.position_title }}</strong>{% if r.is_custom %} <span class="badge badge-gray" style="font-size:11px">Custom</span>{% endif %}</td>
+        <td>{{ r.department_name }}</td>
+        <td>{{ r.requester_name }}</td>
+        <td>{{ r.created_at[:10] }}</td>
+        <td>
+          <span class="badge {% if r.status=='Approved' %}badge-green{% elif r.status=='Rejected' %}badge-red{% else %}badge-blue{% endif %}">
+            {{ r.status }}
+          </span>
+        </td>
+        <td><a href="{{ url_for('recruitment.view_vacancy_request', rid=r.request_id) }}" class="btn btn-sm">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><div class="icon">📋</div><h3>No vacancy requests</h3></div>
+  {% endif %}
+</div>
+{% endblock %}

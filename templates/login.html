@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SmartHR – Sign In</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Inter,system-ui,-apple-system,sans-serif;background:#fff;min-height:100vh;display:flex;color:#111827}
+.login-wrap{display:flex;width:100%;min-height:100vh}
+.login-left{width:55%;background:#14231C;display:flex;align-items:center;justify-content:center;position:relative}
+.login-brand{display:flex;flex-direction:column;align-items:center;gap:20px}
+.login-logo{width:80px;height:80px;background:#233A2E;border-radius:20px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.login-logo::after{content:"";position:absolute;width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.12);right:-6px;top:50%;transform:translateY(-50%)}
+.login-logo .inner-circle{width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.7);position:relative;z-index:1;left:-6px}
+.wordmark{text-align:center}
+.wordmark h1{font-size:32px;font-weight:700;color:#F5F5F5;letter-spacing:-.02em;line-height:1}
+.wordmark p{font-size:14px;color:#6BA97B;margin-top:8px;font-weight:400}
+.login-right{width:45%;background:#fff;display:flex;flex-direction:column;justify-content:center;padding:56px 56px 64px}
+.login-right h2{font-size:20px;font-weight:600;color:#111827;margin-bottom:4px}
+.login-right .sub{font-size:14px;color:#6B7280;margin-bottom:32px}
+.form-group{margin-bottom:20px}
+.form-label{display:block;font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.08em;color:#6B7280;margin-bottom:7px}
+.form-input{width:100%;padding:12px 0;border:none;border-bottom:1px solid #D1D5DB;font-size:15px;font-family:inherit;outline:none;transition:border-color .15s;color:#111827;background:transparent}
+.form-input:hover{border-bottom-color:#9CA3AF}
+.form-input:focus{border-bottom-color:#14231C}
+.form-input::placeholder{color:#9CA3AF}
+.form-row{display:flex;align-items:center;justify-content:space-between;margin:4px 0 24px}
+.remember{display:flex;align-items:center;gap:8px}
+.remember input{width:15px;height:15px;accent-color:#14231C;cursor:pointer}
+.remember label{font-size:13px;color:#4B5563;cursor:pointer}
+.forgot-link{font-size:13px;color:#14231C;text-decoration:none;font-weight:500}
+.forgot-link:hover{text-decoration:underline}
+.btn-login{width:100%;padding:12px;background:#14231C;color:#fff;border:none;border-radius:6px;font-size:14px;font-weight:500;font-family:inherit;cursor:pointer;transition:background .15s}
+.btn-login:hover{background:#0F1A12}
+.btn-login:disabled{background:#9CA3AF;cursor:not-allowed}
+.alert{padding:12px 14px;margin-bottom:20px;border-radius:6px;font-size:13px;line-height:1.5}
+.alert-error{background:#FEF2F2;border:1px solid #FECACA;color:#991B1B}
+.alert-success{background:#F0FDF4;border:1px solid #BBF7D0;color:#166534}
+.demo-box{border-top:1px solid #F3F4F6;padding-top:16px;margin-top:28px}
+.demo-title{font-size:10px;font-weight:600;color:#9CA3AF;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
+.demo-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:6px 0;cursor:pointer;transition:color .15s}
+.demo-row:hover{color:#14231C}
+.demo-role{font-weight:500;color:#374151}
+.demo-cred{color:#9CA3AF;font-variant-numeric:tabular-nums}
+.footer{margin-top:auto;padding-top:20px;font-size:11px;color:#9CA3AF}
+.footer a{color:inherit;text-decoration:underline}
+@media(max-width:900px){.login-left{display:none}.login-right{width:100%;max-width:400px;margin:0 auto;padding:48px 28px}.login-wrap{justify-content:center;align-items:center;padding:24px}}
+</style>
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-left">
+    <div class="login-brand">
+      <div class="login-logo">
+        <div class="inner-circle"></div>
+      </div>
+      <div class="wordmark">
+        <h1>SmartHR</h1>
+        <p>Human Resource Management</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="login-right">
+    <h2>Sign in</h2>
+    <p class="sub">Enter your email and password to access your account.</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="alert {% if cat=='success' %}alert-success{% else %}alert-error{% endif %}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <form method="POST" action="{{ url_for('auth.login') }}" novalidate>
+      <div class="form-group">
+        <label class="form-label" for="email">Email</label>
+        <input class="form-input" type="email" id="email" name="email" placeholder="name@company.com" required autocomplete="email" autofocus>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="password">Password</label>
+        <input class="form-input" type="password" id="password" name="password" placeholder="Enter your password" required autocomplete="current-password">
+      </div>
+      <div class="form-row">
+        <div class="remember">
+          <input type="checkbox" name="remember" id="remember">
+          <label for="remember">Remember me</label>
+        </div>
+        <a class="forgot-link" href="{{ url_for('auth.forgot_password') }}">Forgot password?</a>
+      </div>
+      <button class="btn-login" type="submit">Sign in</button>
+    </form>
+
+    <div class="demo-box">
+      <div class="demo-title">Demo accounts</div>
+      <div class="demo-row" onclick="fillLogin('admin@smarthr.my','Admin@123')">
+        <span class="demo-role">System Admin</span><span class="demo-cred">admin@smarthr.my</span>
+      </div>
+      <div class="demo-row" onclick="fillLogin('hr@smarthr.my','Hr@123')">
+        <span class="demo-role">HR Director</span><span class="demo-cred">hr@smarthr.my</span>
+      </div>
+      <div class="demo-row" onclick="fillLogin('brian@smarthr.my','Manager@123')">
+        <span class="demo-role">CEO - Top Management</span><span class="demo-cred">brian@smarthr.my</span>
+      </div>
+      <div class="demo-row" onclick="fillLogin('hafiz@smarthr.my','Manager@123')">
+        <span class="demo-role">Dept Manager - Engineering (PG)</span><span class="demo-cred">hafiz@smarthr.my</span>
+      </div>
+      <div class="demo-row" onclick="fillLogin('cheeseng@smarthr.my','Manager@123')">
+        <span class="demo-role">Branch Manager (Penang)</span><span class="demo-cred">cheeseng@smarthr.my</span>
+      </div>
+      <div class="demo-row" onclick="fillLogin('elizabeth@smarthr.my','Employee@123')">
+        <span class="demo-role">Employee</span><span class="demo-cred">elizabeth@smarthr.my</span>
+      </div>
+    </div>
+
+    <div class="footer">Maju Teknologi Sdn Bhd &middot; PDPA Compliant</div>
+  </div>
+</div>
+<script>
+function fillLogin(email, pw){
+  document.querySelector('input[name=email]').value = email;
+  document.querySelector('input[name=password]').value = pw;
+}
+</script>
+</body>
+</html>

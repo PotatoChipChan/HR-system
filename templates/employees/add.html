@@ -1,0 +1,446 @@
+ {% extends "base.html" %}
+{% block title %}Add Employee{% endblock %}
+{% block page_title %}Add New Employee{% endblock %}
+
+{% block content %}
+<div style="max-width:800px">
+<form method="POST" action="{{ url_for('employees.add_employee') }}">
+  <div class="card fade-in" style="margin-bottom:20px;border:1px dashed var(--g300);background:var(--g50)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div>
+        <div style="font-weight:700;color:var(--g700)">Smart Identity Scanner</div>
+        <div style="font-size:12px;color:var(--text-secondary)">Upload IC to auto-fill details.</div>
+      </div>
+      <div class="btn-group" style="display:flex;gap:8px">
+        <a href="{{ url_for('employees.upload_ic', from_hire=request.args.get('from_hire')) }}" class="btn btn-sm btn-primary">
+          📷 Upload MyKad (IC)
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <input type="hidden" name="id_document_path" id="id_document_path" value="{{ form_data.get('id_document_path','') }}">
+  {% if request.args.get('from_hire') %}<input type="hidden" name="from_hire" value="1">{% endif %}
+
+  <div class="card fade-in" style="margin-bottom:20px">
+    <div class="sec-title">Personal Information</div>
+    <div class="form-row">
+      <div class="form-group mb-0"><label class="form-label">Full Name *</label><input class="form-input" name="full_name" value="{{ form_data.get('full_name','') }}" required placeholder="e.g. Ahmad bin Abdullah"></div>
+      <div class="form-group mb-0" id="ic_number_group">
+        <label class="form-label">IC Number</label>
+        <input class="form-input" name="ic_number" id="ic_number_input" value="{{ form_data.get('ic_number','') }}" placeholder="e.g. 900101-14-5001">
+      </div>
+      <div class="form-group mb-0" id="passport_number_group" style="display:none">
+        <label class="form-label">Passport Number</label>
+        <input class="form-input" id="passport_number_input" name="passport_number" placeholder="e.g. A12345678">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group mb-0"><label class="form-label">Date of Birth</label><input class="form-input" name="date_of_birth" value="{{ form_data.get('date_of_birth','') }}" type="date"></div>
+      <div class="form-group mb-0">
+        <label class="form-label">Gender</label>
+        <select class="form-input" name="gender">
+          <option value="">Select gender</option>
+          <option value="Male" {{ 'selected' if form_data.get('gender')=='Male' }}>Male</option>
+          <option value="Female" {{ 'selected' if form_data.get('gender')=='Female' }}>Female</option>
+          <option value="Other" {{ 'selected' if form_data.get('gender')=='Other' }}>Other</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group mb-0"><label class="form-label">Contact No.</label><input class="form-input" name="contact_no" value="{{ form_data.get('contact_no','') }}" placeholder="+601X-XXXXXXXX"></div>
+      <div class="form-group mb-0"><label class="form-label">SmartHR Email *</label><input class="form-input" type="email" name="email" value="{{ form_data.get('email','') }}" required placeholder="name@smarthr.my"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group mb-0"><label class="form-label">Personal Email</label><input class="form-input" type="email" name="personal_email" value="{{ form_data.get('personal_email','') }}" placeholder="candidate@personal.com"></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Home Address</label>
+      <textarea class="form-input" name="address" id="address_input" rows="2" placeholder="No. X, Jalan …">{{ form_data.get('address','') }}</textarea>
+    </div>
+    <div class="form-row">
+      <div class="form-group mb-0"><label class="form-label">Emergency Contact Name</label><input class="form-input" name="emergency_contact_name" value="{{ form_data.get('emergency_contact_name','') }}" placeholder="Next of kin name"></div>
+      <div class="form-group mb-0"><label class="form-label">Emergency Contact No.</label><input class="form-input" name="emergency_contact_no" value="{{ form_data.get('emergency_contact_no','') }}" placeholder="+601X-XXXXXXXX"></div>
+    </div>
+  </div>
+
+  <div class="card fade-in" style="margin-bottom:20px">
+    <div class="sec-title">Employment Details</div>
+    <div class="form-row">
+      <div class="form-group mb-0">
+        <label class="form-label">Branch *</label>
+        <select class="form-input" name="branch_id" id="branch_id" onchange="filterDepartments()" required>
+          <option value="">Select branch</option>
+          {% for b in branches %}
+          <option value="{{ b.branch_id }}" {{ 'selected' if form_data.get('branch_id')|string == b.branch_id|string }}>{{ b.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group mb-0">
+        <label class="form-label">Department *</label>
+        <select class="form-input" name="department_id" id="department_id" onchange="filterDepartments(); filterPositions()" required>
+          <option value="">Select department</option>
+          {% for d in departments %}
+          <option value="{{ d.department_id }}" data-branch="{{ d.branch_id }}" {{ 'selected' if form_data.get('department_id')|string == d.department_id|string }}>{{ d.department_name }} ({{ d.branch_name }})</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group mb-0">
+        <label class="form-label">Position / Job Title</label>
+        <select class="form-input" name="position_id" id="position_id" onchange="toggleCustomPosition()">
+          <option value="">Select position</option>
+          {% for p in positions %}
+          <option value="{{ p.position_id }}" data-dept="{{ p.department_id }}" data-branch="{{ p.dept_branch_id }}" {{ 'selected' if form_data.get('position_id')|string == p.position_id|string }}>{{ p.position_name }}</option>
+          {% endfor %}
+          <option value="__custom__">Custom… (type below)</option>
+        </select>
+        <input class="form-input" name="position" id="custom_position" placeholder="e.g. Software Engineer" value="{{ form_data.get('position','') }}" style="display:none;margin-top:6px">
+        <p class="hint" id="custom_position_hint" style="display:none;color:#888;font-size:12px;margin-top:4px">Custom titles stay free text until HR adds them to the position catalog.</p>
+      </div>
+      <div class="form-group mb-0"><label class="form-label">Hire Date *</label><input class="form-input" type="date" name="hire_date" value="{{ form_data.get('hire_date','') }}" required></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group mb-0"><label class="form-label">Work Start Time</label><input class="form-input" type="time" name="work_start_time" value="{{ form_data.get('work_start_time','09:00') }}"></div>
+      <div class="form-group mb-0"><label class="form-label">Work End Time</label><input class="form-input" type="time" name="work_end_time" value="{{ form_data.get('work_end_time','18:00') }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group mb-0">
+        <label class="form-label">Employment Type *</label>
+        <select class="form-input" name="employment_type" required>
+          {% for et in ['Full-Time','Part-Time','Contract'] %}
+          <option value="{{ et }}" {{ 'selected' if form_data.get('employment_type') == et }}>{{ et }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group mb-0">
+        <label class="form-label">Base Salary (RM) *</label>
+        <input class="form-input" type="number" name="base_salary" step="0.01" min="0" value="{{ form_data.get('base_salary','') }}" placeholder="0.00" required>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group mb-0">
+        <label class="form-label">System Role *</label>
+        <select class="form-input" name="role_id" required>
+          {% for r in roles %}
+          <option value="{{ r.role_id }}" {{ 'selected' if form_data.get('role_id')|string == r.role_id|string }}>{{ r.role_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group mb-0">
+        <label class="form-label">Employment Status</label>
+        <select class="form-input" name="employment_status">
+          <option value="Active" {{ 'selected' if form_data.get('employment_status') == 'Active' }}>Active</option>
+          <option value="Inactive" {{ 'selected' if form_data.get('employment_status') == 'Inactive' }}>Inactive</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card fade-in" style="margin-bottom:20px">
+    <div class="sec-title">Login Credentials</div>
+    {% if request.args.get('from_hire') %}
+    <p style="color:var(--text-secondary);font-size:13px;margin-bottom:12px">
+      A temporary password will be auto-generated and sent to the Personal Email above.
+    </p>
+    <input type="hidden" name="password" value="">
+    <input type="hidden" name="confirm_password" value="">
+    {% else %}
+    <div class="form-row">
+      <div class="form-group mb-0">
+        <label class="form-label">Password *</label>
+        <input class="form-input" type="password" name="password" required minlength="6" placeholder="Min. 6 characters">
+      </div>
+      <div class="form-group mb-0">
+        <label class="form-label">Confirm Password *</label>
+        <input class="form-input" type="password" name="confirm_password" required placeholder="Repeat password">
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="btn-row">
+    <button class="btn btn-primary" type="submit">Create Employee</button>
+    <a class="btn" href="{{ url_for('employees.list_employees') }}">Cancel</a>
+  </div>
+</form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+  .field-error .form-input,
+  .field-error select.form-input,
+  .field-error textarea.form-input {
+    border: 2px solid #e24b4a !important;
+    background: #fef2f2 !important;
+  }
+  .field-error .form-label {
+    color: #e24b4a !important;
+    font-weight: 600;
+  }
+  .field-error-msg {
+    color: #e24b4a;
+    font-size: 12px;
+    margin-top: 4px;
+    display: none;
+  }
+  .field-error .field-error-msg {
+    display: block;
+  }
+</style>
+<script>
+function validateForm(e) {
+    e.preventDefault();
+    var form = e.target;
+    var isValid = true;
+
+    // Clear previous errors
+    form.querySelectorAll('.form-group').forEach(function(g) {
+        g.classList.remove('field-error');
+        var msg = g.querySelector('.field-error-msg');
+        if (msg) msg.remove();
+    });
+
+    // Required fields: [name, label]
+    var requiredFields = [
+        ['full_name', 'Full Name'],
+        ['email', 'SmartHR Email'],
+        ['branch_id', 'Branch'],
+        ['department_id', 'Department'],
+        ['hire_date', 'Hire Date'],
+        ['employment_type', 'Employment Type'],
+        ['base_salary', 'Base Salary'],
+        ['role_id', 'System Role']
+    ];
+
+    // Only check password if not from_hire
+    var urlParams = new URLSearchParams(window.location.search);
+    if (!urlParams.get('from_hire')) {
+        requiredFields.push(['password', 'Password']);
+        requiredFields.push(['confirm_password', 'Confirm Password']);
+    }
+
+    requiredFields.forEach(function(pair) {
+        var name = pair[0], label = pair[1];
+        var input = form.querySelector('[name="' + name + '"]');
+        if (!input) return;
+        var val = input.value.trim();
+        if (!val) {
+            markError(input, label + ' is required');
+            isValid = false;
+        }
+    });
+
+    // Full Name — alphabets and spaces only
+    var nameInput = form.querySelector('[name="full_name"]');
+    if (nameInput && nameInput.value.trim()) {
+        var nameRe = /^[A-Za-z\s'-]+$/;
+        if (!nameRe.test(nameInput.value.trim())) {
+            markError(nameInput, 'Name must contain only alphabets');
+            isValid = false;
+        }
+    }
+
+    // IC Number — Malaysian format YYMMDD-PB-####
+    var icInput = form.querySelector('[name="ic_number"]');
+    if (icInput && icInput.value.trim()) {
+        var icVal = icInput.value.trim();
+        // Allow formats: 900101-14-5001 or 900101145001
+        var icClean = icVal.replace(/-/g, '');
+        var icRe1 = /^\d{12}$/;
+        var icRe2 = /^\d{6}-\d{2}-\d{4}$/;
+        if (!icRe1.test(icClean) && !icRe2.test(icVal)) {
+            markError(icInput, 'IC format: YYMMDD-PB-#### (e.g. 900101-14-5001)');
+            isValid = false;
+        } else if (icClean.length === 12) {
+            var mm = parseInt(icClean.substring(2, 4));
+            var dd = parseInt(icClean.substring(4, 6));
+            if (mm < 1 || mm > 12 || dd < 1 || dd > 31) {
+                markError(icInput, 'IC date portion is invalid');
+                isValid = false;
+            }
+            var state = parseInt(icClean.substring(6, 8));
+            if (state < 1 || state > 59) {
+                markError(icInput, 'IC state code is invalid');
+                isValid = false;
+            }
+        }
+    }
+
+    // Contact Number — Malaysian format
+    var contactInput = form.querySelector('[name="contact_no"]');
+    if (contactInput && contactInput.value.trim()) {
+        var cVal = contactInput.value.trim().replace(/[\s-]/g, '');
+        // +601X..., 01X..., 601X...
+        var phoneRe = /^(\+?6?01)[0-9]{8,9}$/;
+        if (!phoneRe.test(cVal)) {
+            markError(contactInput, 'Enter a valid Malaysian phone number (e.g. 012-3456789 or +60123456789)');
+            isValid = false;
+        }
+    }
+
+    // Email format
+    var emailInput = form.querySelector('[name="email"]');
+    if (emailInput && emailInput.value.trim()) {
+        var emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRe.test(emailInput.value.trim())) {
+            markError(emailInput, 'Enter a valid email address');
+            isValid = false;
+        }
+    }
+
+    // Password min length + match
+    if (!urlParams.get('from_hire')) {
+        var pw = form.querySelector('[name="password"]');
+        var cpw = form.querySelector('[name="confirm_password"]');
+        if (pw && pw.value && pw.value.length < 6) {
+            markError(pw, 'Password must be at least 6 characters');
+            isValid = false;
+        }
+        if (pw && cpw && pw.value && cpw.value && pw.value !== cpw.value) {
+            markError(cpw, 'Passwords do not match');
+            isValid = false;
+        }
+    }
+
+    // Salary must be positive
+    var salaryInput = form.querySelector('[name="base_salary"]');
+    if (salaryInput && salaryInput.value && parseFloat(salaryInput.value) < 0) {
+        markError(salaryInput, 'Salary cannot be negative');
+        isValid = false;
+    }
+
+    if (isValid) {
+        form.submit();
+    } else {
+        // Scroll to first error
+        var firstErr = form.querySelector('.field-error');
+        if (firstErr) firstErr.scrollIntoView({behavior: 'smooth', block: 'center'});
+    }
+}
+
+function markError(input, msg) {
+    var group = input.closest('.form-group');
+    if (!group) return;
+    group.classList.add('field-error');
+    var errDiv = document.createElement('div');
+    errDiv.className = 'field-error-msg';
+    errDiv.textContent = msg;
+    group.appendChild(errDiv);
+}
+
+// Server-side error highlighting
+var serverErrors = {{ error_fields | tojson }};
+serverErrors.forEach(function(fieldName) {
+    var input = document.querySelector('[name="' + fieldName + '"]');
+    if (!input) return;
+    var group = input.closest('.form-group');
+    if (!group) return;
+    group.classList.add('field-error');
+    if (!group.querySelector('.field-error-msg')) {
+        var errDiv = document.createElement('div');
+        errDiv.className = 'field-error-msg';
+        if (fieldName === 'email') errDiv.textContent = 'This email address already exists';
+        else if (fieldName === 'ic_number') errDiv.textContent = 'This IC number already exists';
+        else if (fieldName === 'full_name') errDiv.textContent = 'Name must contain only alphabets';
+        else if (fieldName === 'contact_no') errDiv.textContent = 'Enter a valid Malaysian phone number';
+        else if (fieldName === 'password') errDiv.textContent = 'Passwords do not match';
+        else if (fieldName === 'confirm_password') errDiv.textContent = 'Passwords do not match';
+        else errDiv.textContent = 'This field has an error';
+        group.appendChild(errDiv);
+    }
+});
+if (serverErrors.length > 0) {
+    var firstErr = document.querySelector('.field-error');
+    if (firstErr) firstErr.scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+
+function filterDepartments() {
+    const branchId = document.getElementById('branch_id').value;
+    const deptSelect = document.getElementById('department_id');
+    const options = deptSelect.querySelectorAll('option');
+
+    options.forEach(opt => {
+        if (!opt.value) return;
+        const optBranch = opt.getAttribute('data-branch');
+        if (!branchId || optBranch === branchId) {
+            opt.style.display = "";
+        } else {
+            opt.style.display = "none";
+        }
+    });
+
+    if (deptSelect.value && deptSelect.selectedOptions[0].style.display === "none") {
+        deptSelect.value = "";
+    }
+}
+
+function filterPositions() {
+    const branchId = document.getElementById('branch_id').value;
+    const deptId = document.getElementById('department_id').value;
+    const posSelect = document.getElementById('position_id');
+    const options = posSelect.querySelectorAll('option');
+
+    options.forEach(opt => {
+        if (!opt.value) return;
+        if (opt.value === '__custom__') {
+            opt.style.display = "";
+            return;
+        }
+        const optDept = opt.getAttribute('data-dept');
+        const optBranch = opt.getAttribute('data-branch');
+        let visible = true;
+        if (deptId && optDept !== deptId) visible = false;
+        if (branchId && optBranch && optBranch !== branchId) visible = false;
+        opt.style.display = visible ? "" : "none";
+    });
+
+    if (posSelect.value && posSelect.selectedOptions[0].style.display === "none") {
+        posSelect.value = "";
+        toggleCustomPosition();
+    }
+}
+
+function toggleCustomPosition() {
+    const sel = document.getElementById('position_id');
+    const isCustom = sel.value === '__custom__';
+    document.getElementById('custom_position').style.display = isCustom ? '' : 'none';
+    document.getElementById('custom_position_hint').style.display = isCustom ? '' : 'none';
+}
+
+function loadOcrData() {
+    const ocrDataStr = sessionStorage.getItem('icOcrData');
+    if (!ocrDataStr) return;
+
+    try {
+        const data = JSON.parse(ocrDataStr);
+        if (data.full_name) document.getElementsByName('full_name')[0].value = data.full_name;
+        if (data.ic_number) document.getElementById('ic_number_input').value = data.ic_number;
+        if (data.date_of_birth) document.getElementsByName('date_of_birth')[0].value = data.date_of_birth;
+        if (data.gender) document.getElementsByName('gender')[0].value = data.gender;
+        if (data.address) document.getElementById('address_input').value = data.address;
+        if (data.id_document_path) document.getElementById('id_document_path').value = data.id_document_path;
+        
+        // Clear from storage
+        sessionStorage.removeItem('icOcrData');
+    } catch (e) {
+        console.error('Error loading OCR data:', e);
+    }
+}
+
+document.querySelector('form').addEventListener('submit', validateForm);
+
+window.onload = function() {
+    filterDepartments();
+    filterPositions();
+    toggleCustomPosition();
+    // Check if we came from IC upload page
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('from_ic_upload')) {
+        loadOcrData();
+    }
+};
+</script>
+{% endblock %}

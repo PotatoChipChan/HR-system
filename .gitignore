@@ -1,0 +1,49 @@
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Instance / Database
+instance/
+
+# Uploads / Data
+uploads/
+scratch/
+
+# IDE
+.idea/
+.vscode/
+.cursor/
+.junie/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Server logs
+*.log
+
+# OCR model cache
+.EasyOCR/
+
+# AI tool output
+graphify-out/
+
+# Session cookies / credentials
+cookies*.txt
+
+# Test fixtures & artifacts (keep test_*.py scripts)
+test_batch/
+test_IC/
+test_inv/
+test_batch_100_results.csv
+test_result.txt
+debug_guilloche.png
+test_convert.png
+test_convert2.png

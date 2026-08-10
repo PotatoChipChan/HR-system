@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Interviews{% endblock %}
+{% block page_title %}Interviews{% endblock %}
+{% block content %}
+<div class="card fade-in">
+  <div class="sec-title">
+    Scheduled Interviews
+    <div>
+      {% if session['user_role'] in ('Admin','HR') %}
+      <a href="{{ url_for('recruitment.bulk_schedule') }}" class="btn btn-sm btn-primary">+ Bulk Schedule</a>
+      {% endif %}
+    </div>
+  </div>
+  <div class="filter-bar">
+    <form method="GET" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <select name="status" class="form-input" style="width:auto" onchange="this.form.submit()">
+        <option value="">All statuses</option>
+        <option value="Scheduled" {% if request.args.status=='Scheduled' %}selected{% endif %}>Scheduled</option>
+        <option value="Confirmed" {% if request.args.status=='Confirmed' %}selected{% endif %}>Confirmed</option>
+        <option value="Completed" {% if request.args.status=='Completed' %}selected{% endif %}>Completed</option>
+        <option value="Cancelled" {% if request.args.status=='Cancelled' %}selected{% endif %}>Cancelled</option>
+      </select>
+      {% if request.args.status %}
+      <a href="{{ url_for('recruitment.list_interviews') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+      {% endif %}
+    </form>
+  </div>
+  {% if interviews %}
+  <table class="tbl">
+    <thead><tr><th>Date</th><th>Applicant</th><th>Position</th><th>Interviewer</th><th>Type</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for iv in interviews %}
+      <tr>
+        <td>{{ iv.scheduled_at[:16] }}</td>
+        <td><a href="{{ url_for('recruitment.view_application', aid=iv.application_id) }}" style="font-weight:600;text-decoration:none;color:var(--text-primary)">{{ iv.applicant_name }}</a></td>
+        <td>{{ iv.job_title }}</td>
+        <td>{{ iv.interviewer_name or '—' }}</td>
+        <td>{{ iv.type }}</td>
+        <td><span class="badge {% if iv.status=='Completed' %}badge-green{% elif iv.status=='Cancelled' %}badge-red{% else %}badge-blue{% endif %}">{{ iv.status }}</span></td>
+        <td>
+          <a href="{{ url_for('recruitment.view_application', aid=iv.application_id) }}" class="btn btn-sm btn-outline-secondary">View</a>
+          {% if session['user_role'] in ('Admin','HR','HR Manager') and iv.status in ('Scheduled','Confirmed') %}
+          <form method="POST" action="{{ url_for('recruitment.cancel_interview', iid=iv.interview_id) }}" style="display:inline">
+            <button class="btn btn-sm btn-outline-secondary" onclick="return confirm('Cancel this interview?')">Cancel</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><div class="icon">🗓️</div><h3>No interviews found</h3></div>
+  {% endif %}
+</div>
+{% endblock %}

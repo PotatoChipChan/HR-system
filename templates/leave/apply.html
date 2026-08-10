@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Leave Application{% endblock %}
+{% block page_title %}Apply Leave{% endblock %}
+
+{% block content %}
+<div class="two-col">
+  <!-- Left: Balance Cards -->
+  <div>
+    <div class="card fade-in" style="margin-bottom:20px">
+      <div class="sec-title">My Leave Balances (2026)</div>
+      {% if balances %}
+      <div class="leave-bal-grid">
+        {% for b in balances %}
+        <div class="leave-bal-card">
+          <div class="leave-bal-val">{{ (b.entitled_days - b.used_days - b.pending_days)|round(1) }}</div>
+          <div class="leave-bal-name">{{ b.type_name }}</div>
+          <div class="text-muted">{{ b.entitled_days|int }} entitled · {{ b.used_days|int }} used</div>
+          <div class="prog" style="margin-top:6px">
+            <div class="prog-fill" style="width:{{ [100,(b.used_days/b.entitled_days*100)|int if b.entitled_days else 0]|min }}%"></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="text-muted">No leave balances configured. Contact HR.</div>
+      {% endif %}
+    </div>
+
+    <!-- My applications -->
+    <div class="card fade-in">
+      <div class="sec-title">My Recent Applications</div>
+      {% if recent %}
+      <table class="tbl">
+        <thead><tr><th>Type</th><th>Dates</th><th>Days</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+          {% for la in recent %}
+          <tr>
+            <td>{{ la.type_name }}</td>
+            <td>{{ la.start_date }} → {{ la.end_date }}</td>
+            <td>{{ la.total_days|int }}</td>
+            <td>
+              {% if la.status=='Approved' %}<span class="badge badge-green">Approved</span>
+              {% elif la.status=='Rejected' %}<span class="badge badge-red">Rejected</span>
+              {% elif la.status=='Cancelled' %}<span class="badge badge-gray">Cancelled</span>
+              {% else %}<span class="badge badge-amber">Pending</span>{% endif %}
+            </td>
+             <td>
+               <div style="display:flex; gap:4px; flex-wrap:wrap;">
+                 {% if la.supporting_doc %}
+                 <a href="{{ url_for('leave.download_attachment', lid=la.leave_id) }}" target="_blank" class="btn btn-sm btn-primary">View</a>
+                 {% endif %}
+                 {% if la.status=='Pending' %}
+                 <form method="POST" action="{{ url_for('leave.cancel', lid=la.leave_id) }}"
+                       onsubmit="return confirm('Cancel this application?')" style="margin:0;">
+                   <button class="btn btn-sm btn-danger" type="submit">Cancel</button>
+                 </form>
+                 {% endif %}
+               </div>
+             </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty-state"><div class="icon">📅</div><p>No leave applications yet</p></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Right: Apply Form -->
+  <div class="card fade-in">
+    <div class="sec-title">New Leave Request</div>
+    <form method="POST" action="{{ url_for('leave.apply') }}" enctype="multipart/form-data">
+      <div class="form-group">
+        <label class="form-label">Leave Type *</label>
+        <select class="form-input" name="leave_type_id" required>
+          <option value="">Select leave type</option>
+          {% for lt in leave_types %}
+          <option value="{{ lt.leave_type_id }}">{{ lt.type_name }}{% if not lt.is_paid %} (Unpaid){% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Start Date *</label>
+          <input class="form-input" type="date" name="start_date" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">End Date *</label>
+          <input class="form-input" type="date" name="end_date" required>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Reason</label>
+        <textarea class="form-input" name="reason" rows="3" placeholder="Brief reason for your leave…"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Attachment <span class="text-muted">(optional)</span></label>
+        <input class="form-input" type="file" name="attachment" accept=".jpg,.jpeg,.png,.pdf">
+        <p style="font-size:11px;color:#888;margin-top:4px">Upload supporting document (e.g., medical certificate). Accepted: JPG, PNG, PDF.</p>
+      </div>
+      <div class="ai-panel" style="margin-bottom:16px">
+        <div class="ai-tag">ℹ️ Note</div>
+        <p style="font-size:12px;margin-top:4px">Working days (Mon–Fri) are counted automatically. Your manager will be notified.</p>
+      </div>
+      <button class="btn btn-primary" type="submit" style="width:100%">Submit Leave Request</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

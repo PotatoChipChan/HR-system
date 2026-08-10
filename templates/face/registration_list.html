@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Face Registration{% endblock %}
+{% block page_title %}Face Registration Management{% endblock %}
+
+{% block content %}
+<div class="card fade-in">
+  <div class="sec-title">
+    Employee Face Registration
+    <div style="display:flex;gap:8px">
+      <a class="btn btn-sm" href="{{ url_for('employees.list_employees') }}">Back to Employees</a>
+    </div>
+  </div>
+
+  {% if employees %}
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>Employee</th>
+        <th>ID</th>
+        <th>Department</th>
+        <th>Branch</th>
+        <th>Status</th>
+        <th>Face Registration</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in employees %}
+      <tr>
+        <td>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="avatar" style="width:32px;height:32px;font-size:11px">
+              {{ e.full_name[:2].upper() }}
+            </div>
+            <div>
+              <div style="font-weight:500">{{ e.full_name }}</div>
+              <div style="font-size:11px;color:var(--text-secondary)">{{ e.email }}</div>
+            </div>
+          </div>
+        </td>
+        <td style="font-family:monospace;font-size:12px">#{{ '%04d'|format(e.employee_id) }}</td>
+        <td>{{ e.department_name }}</td>
+        <td>{{ e.branch_name }}</td>
+        <td>
+          {% if e.employment_status == 'Active' %}<span class="badge badge-green">Active</span>
+          {% elif e.employment_status == 'On Leave' %}<span class="badge badge-amber">On Leave</span>
+          {% elif e.employment_status == 'Inactive' %}<span class="badge badge-gray">Inactive</span>
+          {% else %}<span class="badge badge-red">{{ e.employment_status }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if e.face_registered %}
+            <span class="badge badge-green">Registered</span>
+            {% if e.face_updated_at %}<div style="font-size:10px;color:var(--text-secondary);margin-top:2px">{{ e.face_updated_at[:10] }}</div>{% endif %}
+          {% else %}
+            <span class="badge badge-red">Not Registered</span>
+          {% endif %}
+        </td>
+        <td>
+          <a class="btn btn-sm {% if e.face_registered %}btn-primary{% else %}btn{% endif %}"
+             href="{{ url_for('face.register_face_page', emp_id=e.employee_id) }}">
+            {% if e.face_registered %}Re-register{% else %}Register Face{% endif %}
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="text-muted" style="margin-top:12px">Showing {{ employees|length }} employee(s)</div>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon">👤</div>
+    <h3>No employees found</h3>
+    <p>There are no employees in the system.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

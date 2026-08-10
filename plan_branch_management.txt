@@ -1,0 +1,401 @@
+================================================================================
+PLAN - Branch Managers, Top Management & Branch-Filtered Department Managers
+       (SmartHR org structure + department form hardening)
+================================================================================
+Status: PLANNED - not implemented (2026-08-10)
+Author: AI assistant (with project owner decisions)
+
+This is the ONLY plan document for this feature (the earlier
+plan_branch_manager.txt was deleted - its branch_manager_id-column approach
+was abandoned). It is written to be fully self-contained: a new AI session
+with NO prior context can read this file and implement the feature without
+any other information.
+
+================================================================================
+1. WHAT THE SYSTEM IS (context for a stranger)
+================================================================================
+
+SmartHR is a Flask + SQLite web HR system (Python, SQLite, plain HTML/CSS
+templates with a custom design system - NOT Bootstrap at runtime). Demo app
+database: instance/smarthr.db (created/seeded by running `python -X utf8
+init_db.py`, which is idempotent).
+
+Core entities:
+  Company (1) -> Branch (3 real: 1=KL Headquarters, 2=Penang Office,
+                 3=Johor Bahru Branch) -> Department (each belongs to exactly
+                 one branch via branch_id) -> Employee (has branch_id AND
+                 department_id, plus position_id -> Position catalog).
+
+Position Catalog (already implemented, see plan_position_catalog.txt):
+  - Table Position: per-department catalog of job titles.
+      position_name TEXT NOT NULL CHECK(TRIM(position_name)=position_name
+        AND position_name NOT LIKE '%  %' AND length(TRIM(position_name))>0),
+      UNIQUE (department_id, position_name COLLATE NOCASE)   -- case-insensitive
+    Names must be stored pre-trimmed with collapsed inner whitespace; the app
+    normalizes with ' '.join(name.split()) before every insert.
+  - Employee.position_id / Job_Posting.position_id / Vacancy_Request.position_id
+    link rows; the legacy text columns (Employee.position, Job_Posting.title,
+    Vacancy_Request.position_title) are kept as point-in-time display snapshots.
+  - Identity/authorization: 6 fixed roles (Admin, HR, HR Manager, HR Director,
+    Manager, Employee) enforced by @role_required decorators. Permissions are
+    NOT in the DB.
+  - Department manager: Department.department_manager_id -> Employee.
+    Manager-role users who are NOT department managers are "branch-scoped":
+    they see/act only inside session['branch_id'] (Sprint 10).
+  - Login (app/auth/routes.py:118-121) sets session['is_dept_manager'] and
+    session['managed_dept_id'] from Department.department_manager_id.
+
+Demographic facts (verified against instance/smarthr.db):
+  Departments: 1=Engineering(KL), 2=Human Resources(KL), 3=Operations(KL),
+  4=Finance(KL), 5=Administration(KL), 6=Engineering(PG), 7=Operations(PG),
+  8=Engineering(JB), 9=Operations(JB), 10=Finance(JB).
+  Department managers seeded: hafiz->6, shanthi->4, vincent->1, fauzi->9.
+  Manager-role employees (current, relevant ones):
+    id 3  brian@smarthr.my    Brian Harris            KL dept 3, "Chief Executive Officer" (position_id 6)
+    id 15 weiliang@smarthr.my Tan Wei Liang           KL dept 3, "Operations Manager" (position_id 32)
+    id 16 shanthi@smarthr.my  Shanthi                 KL dept 4, "Finance Manager"  (dept mgr of 4)
+    id 11 vincent@smarthr.my  Vincent Ong             KL dept 1, "Senior Software Engineer" (dept mgr of 1)
+    id 9  hafiz@smarthr.my    Muhammad Hafiz          PG dept 6, "Engineering Manager" (dept mgr of 6)
+    id 19 cheeseng@smarthr.my Ng Chee Seng            PG dept 6, "Engineering Manager" (position_id 13)
+    id 23 kevin_loh@smarthr.my Tan Sri Dato' Kevin Loh JB dept 8, "Director of Engineering" (position_id 10)
+    id 31 fauzi@smarthr.my    Ahmad Fauzi             JB dept 9, "Operations Manager" (dept mgr of 9)
+  Demo logins: admin@smarthr.my/Admin@123, hr@smarthr.my/Hr@123,
+  hafiz@smarthr.my/Manager@123, elizabeth@smarthr.my/Employee@123.
+
+Key code locations:
+  app/organization/routes.py:
+    - _get_managers_for_company() line 20-30  (dept-manager dropdown data)
+    - departments()        line 427            (dept list)
+    - add_department()     line 502            (GET managers + POST insert)
+    - edit_department()    line 541            (GET managers + POST update)
+    - add_position()       line 654            (Position Catalog add)
+    - roles()              (Position Catalog page + dept manager table)
+  app/auth/routes.py line 118-121              (login session dept-mgr flags)
+  app/recruitment/routes.py line 1056-1138     (vacancy request GET/POST scoping)
+  templates/organization/department_form.html  (add/edit department form)
+  templates/organization/role_list.html        (Role list + Position Catalog)
+  templates/organization/department_list.html  (department table)
+  init_db.py:
+    - seed_department_managers() line ~204      (idempotent dept-mgr seeds)
+    - backfill_position_links()  line ~88       (catalog backfill; see issue)
+    - migrate_position_catalog() line ~210      (Position table + rebuild)
+  schemas/schema.sql (root: schema.sql)         (fresh-install DDL)
+  Tests (script style: plain check() calls + a PASS/FAIL count, exit 1 on fail;
+  run with `python -X utf8 <file>.py` against the LIVE instance/smarthr.db):
+    - test_position_catalog.py        (currently 59/60 - see 3.4 known issue)
+    - test_sprint10_branch_scoping.py (currently 27/27)
+
+================================================================================
+2. GOAL / REQUIREMENTS (project owner)
+================================================================================
+
+Requirement A - Branch Managers must be real, visible org units.
+  - There must be a department named "Branch Manager" (in the Department
+    table, one per branch) and, in the Position Catalog, a position named
+    "(branch location) Branch Manager" - e.g. "Penang Branch Manager",
+    "KL Branch Manager", "Johor Bahru Branch Manager" - so they appear in
+    the Position Catalog and department lists.
+  - Decision (owner): PER-BRANCH departments, i.e. each branch gets its own
+    "Branch Manager" department containing exactly one branch-manager
+    position. NOT a single shared department (a department can only belong
+    to one branch; shared would be incoherent).
+
+Requirement B - Top Management separates HQ managers from branch managers.
+  - A "Top Management" department (KL Headquarters) must exist for HQ
+    leadership; the CEO (Brian Harris) belongs there - he must NOT be a
+    "KL Branch Manager".
+  - C-suite positions: check existing employees for suitable people first;
+    only if nobody exists, seed new demo employees. (Verified: apart from
+    the CEO there are no C-suite staff - see section 5.2.)
+
+Requirement C - Department form filters the manager dropdown by branch.
+  - In "Add/Edit Department", when a branch is selected, the Department
+    Manager dropdown must show ONLY managers of that branch (client-side
+    filter, e.g. pick Penang Office -> only Penang managers). Server-side
+    POST must also reject a manager from a different branch (anti-crafting).
+
+Requirement D - Clean up demo/test artifacts.
+  - Branch 4 "New Branch", departments 11 "New Department" and 12
+    "New Department 2.0", their employees and positions are leftovers from
+    earlier tests and must be deleted.
+
+================================================================================
+3. CURRENT STATE (facts - all verified 2026-08-10)
+================================================================================
+
+3.1 Branch managers today
+  - There is NO branch manager concept in code: grep for "branch_manager" in
+    app/ finds zero matches. No "Branch Manager" department, no
+    "(branch) Branch Manager" positions, no branch_manager_id column.
+  - Branch scoping is implicit: any Manager-role employee who is not a
+    department manager is treated as branch-wide via session['branch_id'].
+    Example: brian@smarthr.my (KL) can submit vacancy requests for all KL
+    departments today.
+
+3.2 Top management / CEO today
+  - brian@smarthr.my is "Chief Executive Officer"; the position also exists
+    in the Position Catalog inside Operations (dept 3) - an odd placement,
+    but the catalog design allows any title per department.
+
+3.3 Department form (requirement C today)
+  - _get_managers_for_company() (organization/routes.py:20-30) returns
+    employee_id, full_name, branch_name, position_name for Manager/HR-Manager
+    role employees company-wide. It does NOT return e.branch_id.
+  - department_form.html renders a plain <select> of ALL managers with
+    "Name - Position (Branch)" labels and NO branch filtering JavaScript.
+  - add_department POST (line 503-529) / edit_department POST (556-574)
+    accept department_manager_id WITHOUT verifying the manager's branch
+    matches the submitted branch_id (crafted POST can assign cross-branch).
+
+3.4 Position Catalog suite state (relevant to the backfill fix below)
+  - test_position_catalog.py currently reports 59/60: the check
+    "Backfill: re-run creates no new catalog rows" FAILS because
+    backfill_position_links() scans Job_Posting.title including postings that
+    were created from CUSTOM vacancy requests (is_custom=1, position_id NULL,
+    e.g. title "Tmp Cosmic Engineer"). A re-run INSERTs those custom titles
+    into the catalog, violating the governance rule "custom titles stay free
+    text until HR catalogues them". The fix is part of this plan (5.5).
+
+3.5 Demo/test artifacts (requirement D today)
+  - branch_id=4 "New Branch"; department_id 11 "New Department" and 12
+    "New Department 2.0"; 1 Position row in those departments; 2 Employee
+    rows (e.g. id 42 "New Employee", Manager role); 0 Job_Posting /
+    0 Vacancy_Request rows referencing them. No audit-log history required.
+
+================================================================================
+4. PROBLEM
+================================================================================
+
+1. Users cannot see or manage "who is the branch manager": no department,
+   no position, no assignment UI - branch managers are invisible implicit
+   role-scoping.
+2. HQ leadership (CEO) has no home: making the KL branch manager the head
+   of all KL managers conflates top management with branch management.
+3. The Add/Edit Department form shows managers from ALL branches regardless
+   of the chosen branch (confusing, error-prone), and its POST accepts
+   cross-branch assignments.
+4. Backfill re-runs promote custom-approved posting titles into the catalog
+   (breaks the custom-review governance rule; 1 failing test).
+5. Leftover demo artifacts ("New Branch" etc.) pollute branch/department
+   lists and manager dropdowns.
+
+================================================================================
+5. SOLUTION / PLAN
+================================================================================
+
+5.1 Target org structure (seed data - init_db.py)
+
+Create these Department + Position rows (idempotent: look up before insert):
+
+  Branch          New Department   Position in it            Assigned person
+  --------------  ---------------  ------------------------  -----------------
+  KL (1)          Top Management   Chief Executive Officer   brian@smarthr.my (3)
+  KL (1)          Top Management   Chief Operating Officer   coo@smarthr.my (NEW)
+  KL (1)          Top Management   Chief Financial Officer   cfo@smarthr.my (NEW)
+  KL (1)          Branch Manager   KL Branch Manager         weiliang@smarthr.my (15)
+  Penang (2)      Branch Manager   Penang Branch Manager    cheeseng@smarthr.my (19)
+  Johor Bahru (3) Branch Manager   Johor Bahru Branch Mgmt   kevin_loh@smarthr.my (23)
+
+Position name for KL uses the SHORT location label "KL" (mirrors the owner's
+"Penang Branch Manager" example); seed map: {1:'KL', 2:'Penang',
+3:'Johor Bahru'}. Future branches created via UI are NOT auto-seeded - the
+owner can add a "Branch Manager" department/position manually through the
+existing Department + Position Catalog forms.
+
+Employee changes for the four existing managers (idempotent UPDATEs):
+  - Move department_id into their branch's new department, set position_id to
+    the new catalog position and position text to the new position name.
+    (IMPORTANT: employee.department_id must equal the position's department,
+    because backfill_position_links() relinks by (department_id, name) -
+    otherwise every backfill re-run would UNLINK them.)
+  - Set the new departments' department_manager_id to these employees
+    (brian's Top Management dept keeps department_manager_id NULL - see 5.3).
+
+The old positions they leave behind ("Chief Executive Officer" in dept 3,
+"Operations Manager" dept 3, "Engineering Manager" dept 6, "Director of
+Engineering" dept 8) stay in the catalog as normal unheld titles (0
+employees) - the catalog supports unheld titles; do NOT delete them.
+
+5.2 New C-suite demo employees (requirement B)
+
+Verified: no existing employees except the CEO are C-suite (all other
+Manager-role staff are Engineering/Finance/Operations). So seed exactly two:
+
+  employee:  full_name "Alex Chen"            email coo@smarthr.my
+             full_name "Priya Raj"            email cfo@smarthr.my
+  fields:    company_id=1, branch_id=1, department_id=<Top Management KL>,
+             position text/position_id = their new catalog position,
+             role_id = Manager (3), employment_status 'Active',
+             employment_type 'Full-Time', hire_date e.g. '2020-03-15',
+             work_start_time '09:00', work_end_time '18:00',
+             password Manager@123 (generate_password_hash),
+             plus Leave_Balance rows for current year (mirror add_employee).
+  Both get NO department_manager_id (they are not department managers).
+
+5.3 Scoping exemption (keep Sprint 10 branch-wide behavior)
+
+In app/auth/routes.py login (line 118-121), when looking up the employee's
+managed department, ALSO fetch the department name. If the department_name is
+exactly 'Branch Manager', set session['is_dept_manager'] = False (and
+managed_dept_id = None). Rationale: the Branch Manager department's manager
+IS the branch-wide manager; without this they would be restricted to only
+that single department in vacancy request GET (recruitment/routes.py:1111)
+and POST (line 1064). This keeps brian/weiliang/cheeseng/kevin_loh behaving
+exactly as they do today (branch-wide). Top Management has no dept manager,
+so brian remains a plain Manager - no session change needed for him.
+
+5.4 Department form branch filter (requirement C)
+
+  (a) _get_managers_for_company(): add e.branch_id to the SELECT
+      (alias branch_id) so templates can tag options.
+  (b) department_form.html:
+        <option ... data-branch-id="{{ m.branch_id }}"> on every manager
+        option; small <script> filterManagers():
+          - on branch select change: hide options whose data-branch-id
+            differs from the selected branch (mirror the filterPositions()
+            pattern used in recruitment/add_posting.html);
+          - on page load in EDIT mode: apply filter for
+            department.branch_id immediately; the pre-selected manager
+            option must stay visible even if filtered (edge case);
+          - in ADD mode: show all until a branch is chosen.
+        Dropdown label/hint may say managers shown depend on the branch.
+      (c) Server-side guard in add_department POST + edit_department POST:
+          if department_manager_id is submitted, look up the employee's
+          branch_id and reject with a flash ("Manager ... does not belong to
+          the selected branch.") if it differs from the submitted branch_id
+          (add: branch_id must also resolve to an existing Branch, already
+          partially done in add_department line 515).
+
+5.5 Backfill governance fix (fixes the 59/60 suite)
+
+In init_db.py backfill_position_links(): exclude Job_Posting titles that
+originated from custom-approved vacancy requests from the source query, so a
+re-run NEVER promotes custom titles. Implement via:
+    LEFT JOIN Vacancy_Request vr ON vr.posting_id = Job_Posting.posting_id
+    WHERE ... AND (vr.posting_id IS NULL OR vr.is_custom = 0)
+(i.e. only backfill posting titles that were NOT created from a custom
+request, or whose origin request is unknown). After this change
+test_position_catalog.py must be 60/60.
+
+5.6 Artifact cleanup (requirement D) - once-off, in init_db.py
+
+In FK-safe order on the live DB (or a small one-off script):
+  1. DELETE FROM Employee WHERE branch_id=4 OR department_id IN (11,12);
+  2. DELETE FROM Position WHERE department_id IN (11,12);
+  3. DELETE FROM Department WHERE department_id IN (11,12);
+  4. DELETE FROM Branch WHERE branch_id=4;
+  (No Job_Posting/Vacancy_Request rows reference them - verified.)
+  Keep this idempotent and safe (no-op when already cleaned). Optionally also
+  delete audit log rows mentioning these entities.
+
+5.7 Tests (new file test_branch_manager.py, script-style like
+    test_position_catalog.py; run against the live DB)
+
+  Seed assertions:
+    - Department 'Branch Manager' exists in branches 1, 2, 3
+      (exactly one per branch) and 'Top Management' exists in branch 1.
+    - Position Catalog contains 'KL Branch Manager', 'Penang Branch
+      Manager', 'Johor Bahru Branch Manager', 'Chief Executive Officer',
+      'Chief Operating Officer', 'Chief Financial Officer' - each in the
+      correct department and linked to the right employee (position_id).
+    - Employee links: weiliang/cheeseng/kevin_loh department_id points at
+      their branch's Branch Manager dept + position_id set; brian ->
+      Top Management + CEO; coo/cfo@smarthr.my exist and can log in.
+    - The new departments' department_manager_id = the chosen manager.
+  Scoping:
+    - Login as weiliang@smarthr.my: session['is_dept_manager'] is False,
+      session['branch_id'] == 1; vacancy-request GET shows KL departments
+      (branch-wide, not just the Branch Manager dept).
+    - Same for cheeseng (branch 2), kevin_loh (branch 3).
+  Department form:
+    - GET /organization/department/add contains data-branch-id attributes.
+    - Crafted POST: add department under branch 2 with department_manager_id
+      of a KL manager -> rejected, no Department row created.
+    - edit_department POST same guard.
+  Cleanup assertions:
+    - Branch 'New Branch' (4) and Departments 'New Department'/'New
+      Department 2.0' no longer exist.
+  Regression: re-run test_position_catalog.py (expect 60/60) and
+  test_sprint10_branch_scoping.py (expect 27/27).
+
+5.8 Documentation
+
+  - README.md default-credentials section: replace manager rows with the new
+    demo logins (branch managers weiliang/cheeseng/kevin_loh, CEO brian,
+    COO coo@smarthr.my, CFO cfo@smarthr.my; keep hafiz/vincent/shanthi/fauzi
+    dept managers). init_db.py console print block (line ~736) likewise.
+
+================================================================================
+6. FILES TO MODIFY
+================================================================================
+  MODIFY  init_db.py                        (seed_branch_manager_departments,
+                                             seed c-suite employees, backfill
+                                             fix, artifact cleanup)
+  MODIFY  app/auth/routes.py                (Branch Manager session exemption,
+                                             ~line 118-121)
+  MODIFY  app/organization/routes.py        (_get_managers_for_company add
+                                             branch_id; add/edit_department
+                                             POST branch guard)
+  MODIFY  templates/organization/department_form.html  (data-branch-id +
+                                             filterManagers() JS)
+  MODIFY  readme (README.md)                (demo credentials)
+  ADD     test_branch_manager.py            (new suite)
+
+================================================================================
+7. RISKS / SIDE CASES
+================================================================================
+
+- Employee dept/position mismatch breaks backfill linking: always move the
+  employee's department_id together with the position link (5.1).
+- A manager assigned to BOTH a normal department and a Branch Manager
+  department (rare): keep the existing single-row lookup semantics of
+  auth/routes.py:118-121 (first match wins); document, do not over-engineer.
+- Edit-mode filter edge: the currently assigned manager may come from the
+  pre-selected branch only (server guard enforces it), but keep the option
+  visible when the branch select is switched away.
+- Duplicate "Branch Manager" department for a branch created twice: the seed
+  is idempotent (exists-check by branch_id + department_name); a second
+  department would also be allowed by the data model - rely on unique
+  (branch_id, department_name)? Department has NO unique constraint today:
+  the seed checks existence first; manual duplicates are the owner's choice.
+- Backfill fix must not break the migration backfill for LEGACY postings:
+  legacy postings have no origin vacancy request (vr.posting_id IS NULL) and
+  are still backfilled.
+- New seeded positions must satisfy the Position CHECK/unique constraints
+  (normalize with ' '.join(name.split())).
+- Deleting employees/positions for cleanup must respect FK order (5.6).
+
+================================================================================
+8. DECISIONS MADE (project owner - 2026-08-10)
+================================================================================
+1. Per-branch "Branch Manager" departments (+ per-branch "(location)
+   Branch Manager" positions), NOT a single shared department. [owner]
+2. KL Branch Manager = Tan Wei Liang (weiliang@smarthr.my); CEO Brian Harris
+   moves to a new "Top Management" department instead. [owner]
+3. C-suite: no suitable existing employees besides the CEO -> seed TWO new
+   demo employees (COO Alex Chen, CFO Priya Raj) in Top Management. [owner]
+4. Clean up test artifacts: branch 4 "New Branch", departments 11/12, their
+   employees/positions. [owner]
+5. Top Management department has NO department_manager_id (CEO keeps
+   Manager-role branch scoping; no RBAC change). [assistant recommendation]
+6. Branch Manager department managers are session-exempted from dept-manager
+   scoping -> branch-wide, identical to today. [assistant recommendation]
+7. Department form: client-side filter + server-side branch-ownership guard
+   on add/edit_department POST. [assistant recommendation]
+8. Backfill must never promote custom-approved posting titles. [assistant]
+
+================================================================================
+9. VERIFICATION (run after implementation)
+================================================================================
+  python -X utf8 init_db.py                  (seeds + cleanup, idempotent)
+  python -X utf8 test_branch_manager.py      (new suite - all PASS)
+  python -X utf8 test_position_catalog.py    (expect 60/60)
+  python -X utf8 test_sprint10_branch_scoping.py (expect 27/27)
+  Manual: admin login -> /organization/roles shows the 6 new catalog rows
+  with employee counts; /organization/departments shows Top Management +
+  Branch Manager rows with managers; add/edit department dropdown filters
+  managers by selected branch and rejects cross-branch manager assignment.
+
+================================================================================
+END OF PLAN
+================================================================================

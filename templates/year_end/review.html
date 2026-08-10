@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% block title %}Year-End Review{% endblock %}
+{% block page_title %}{{ year }} Year-End Review{% endblock %}
+
+{% block head %}
+<style>
+  .tab-nav { display:flex; gap:0; border-bottom:2px solid var(--border); margin-bottom:20px; }
+  .tab-nav a { padding:10px 24px; text-decoration:none; color:var(--text-secondary); font-weight:500; border-bottom:2px solid transparent; margin-bottom:-2px; transition:all .15s; }
+  .tab-nav a:hover { color:var(--g600); }
+  .tab-nav a.active { color:var(--g600); border-bottom-color:var(--g600); }
+  .tab-badge { display:inline-block; background:var(--warning-color); color:#fff; border-radius:10px; padding:1px 7px; font-size:11px; margin-left:6px; min-width:18px; text-align:center; }
+  .bulk-bar { display:none; position:fixed; bottom:0; left:0; right:0; background:var(--g600); color:#fff; padding:12px 24px; z-index:999; align-items:center; gap:16px; justify-content:center; }
+  .bulk-bar.show { display:flex; }
+  .bulk-bar .btn { padding:6px 18px; font-size:13px; border:none; border-radius:6px; cursor:pointer; }
+  #rejection-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:1000; align-items:center; justify-content:center; }
+  #rejection-modal.show { display:flex; }
+  #rejection-modal .modal-box { background:#fff; padding:24px; border-radius:12px; min-width:400px; max-width:500px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+  <div class="tab-nav">
+    <a href="{{ url_for('year_end.review', year=year, tab='increment') }}" class="{{ 'active' if tab=='increment' }}">
+      Increments {% if inc_pending %}<span class="tab-badge">{{ inc_pending }}</span>{% endif %}
+    </a>
+    <a href="{{ url_for('year_end.review', year=year, tab='bonus') }}" class="{{ 'active' if tab=='bonus' }}">
+      Bonuses {% if bonus_pending %}<span class="tab-badge">{{ bonus_pending }}</span>{% endif %}
+    </a>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <form method="GET" action="{{ url_for('year_end.review') }}" style="display:flex;gap:8px">
+      <input type="hidden" name="tab" value="{{ tab }}">
+      <select name="year" class="form-input" style="width:90px" onchange="this.form.submit()">
+        {% for y in [2024,2025,2026,2027] %}
+        <option value="{{ y }}" {{ 'selected' if y==year }}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <a class="btn btn-secondary btn-sm" href="{{ url_for('year_end.policy', year=year) }}">⚙️ Compensation Policy</a>
+  </div>
+</div>
+
+{% if tab == 'increment' %}
+
+<div class="info-box" style="background:var(--g50);border:1px solid var(--g200);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--text-secondary);font-size:13px">
+  <strong>Increment Policy ({{ year }}):</strong>
+  {{ '%.1f'|format(inc_policy.increment_pct) }}% for employees with ≥ {{ inc_policy.tenure_threshold_years }} year(s) of service.
+  Effective: {{ inc_policy.effective_month }}/{{ inc_policy.effective_year or '—' }}
+</div>
+
+<form id="inc-form" method="POST" action="{{ url_for('year_end.approve_increment') }}">
+<input type="hidden" name="year" value="{{ year }}">
+<div class="card" style="padding:0;overflow-x:auto">
+<table class="tbl" style="margin:0">
+  <thead>
+    <tr>
+      <th style="width:40px"><input type="checkbox" id="inc-select-all" onchange="toggleAll('inc', this)"></th>
+      <th>Employee</th>
+      <th>Dept</th>
+      <th>Branch</th>
+      <th>Years Served</th>
+      <th>Current Salary</th>
+      <th>New Salary</th>
+      <th>%</th>
+      <th>Grade</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for inc in increments %}
+    {% set yserv = (year - (inc.hire_date or '2000')[:4]|int) %}
+    <tr>
+      <td>
+        {% if inc.status == 'Pending' %}
+        <input type="checkbox" name="increment_ids" value="{{ inc.increment_id }}" class="inc-checkbox" onchange="updateBulkBar('inc')">
+        {% endif %}
+      </td>
+      <td style="font-weight:600">{{ inc.full_name }}</td>
+      <td>{{ inc.department_name }}</td>
+      <td>{{ inc.branch_name }}</td>
+      <td>{{ yserv if yserv>0 else '—' }}</td>
+      <td>RM {{ '%.2f'|format(inc.old_salary) }}</td>
+      <td style="font-weight:600;color:var(--g600)">RM {{ '%.2f'|format(inc.new_salary) }}</td>
+      <td>{{ '%.1f'|format(inc.increment_pct) }}%</td>
+      <td>
+        {% if inc.performance_grade == 'A' %}<span class="badge badge-green">A</span>
+        {% elif inc.performance_grade == 'B' %}<span class="badge badge-blue">B</span>
+        {% elif inc.performance_grade == 'C' %}<span class="badge badge-amber">C</span>
+        {% elif inc.performance_grade == 'D' %}<span class="badge badge-red">D</span>
+        {% else %}—{% endif %}
+      </td>
+      <td>
+        {% if inc.status == 'Pending' %}<span class="badge badge-amber">Pending</span>
+        {% elif inc.status == 'Approved' %}<span class="badge badge-green">Approved</span>
+        {% elif inc.status == 'Rejected' %}<span class="badge badge-grey">Rejected</span>{% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-secondary)">No increment proposals for {{ year }}. All eligible employees may already have proposals.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<div class="bulk-bar" id="inc-bulk-bar">
+  <span id="inc-bulk-count">0 selected</span>
+  <button type="submit" form="inc-form" formaction="{{ url_for('year_end.approve_increment') }}" class="btn" style="background:#16a34a;color:#fff">✓ Approve Selected</button>
+  <button type="button" class="btn" style="background:#dc2626;color:#fff" onclick="showRejectModal('inc')">✕ Reject Selected</button>
+</div>
+</form>
+
+{% else %} {# tab == 'bonus' #}
+
+<div class="info-box" style="background:var(--g50);border:1px solid var(--g200);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--text-secondary);font-size:13px">
+  <strong>Bonus Policy ({{ year }}):</strong>
+  A = {{ bonus_policy.grade_A_months }}m salary &nbsp;|&nbsp;
+  B = {{ bonus_policy.grade_B_months }}m salary &nbsp;|&nbsp;
+  C = {{ bonus_policy.grade_C_months }}m salary &nbsp;|&nbsp;
+  D = {{ bonus_policy.grade_D_months }}m salary &nbsp;|&nbsp;
+  Min tenure: {{ bonus_policy.tenure_threshold_months }} months &nbsp;|&nbsp;
+  Payout in month {{ bonus_policy.payout_month }}
+</div>
+
+<form id="bonus-form" method="POST" action="{{ url_for('year_end.approve_bonus') }}">
+<input type="hidden" name="year" value="{{ year }}">
+<div class="card" style="padding:0;overflow-x:auto">
+<table class="tbl" style="margin:0">
+  <thead>
+    <tr>
+      <th style="width:40px"><input type="checkbox" id="bonus-select-all" onchange="toggleAll('bonus', this)"></th>
+      <th>Employee</th>
+      <th>Dept</th>
+      <th>Branch</th>
+      <th>Grade</th>
+      <th>Base Salary</th>
+      <th>Full Bonus</th>
+      <th>Months Worked</th>
+      <th>Prorated Bonus</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for bp in bonuses %}
+    <tr>
+      <td>
+        {% if bp.status == 'Pending' %}
+        <input type="checkbox" name="bonus_ids" value="{{ bp.proposal_id }}" class="bonus-checkbox" onchange="updateBulkBar('bonus')">
+        {% endif %}
+      </td>
+      <td style="font-weight:600">{{ bp.full_name }}</td>
+      <td>{{ bp.department_name }}</td>
+      <td>{{ bp.branch_name }}</td>
+      <td>
+        {% if bp.grade == 'A' %}<span class="badge badge-green">A</span>
+        {% elif bp.grade == 'B' %}<span class="badge badge-blue">B</span>
+        {% elif bp.grade == 'C' %}<span class="badge badge-amber">C</span>
+        {% elif bp.grade == 'D' %}<span class="badge badge-red">D</span>{% endif %}
+      </td>
+      <td>RM {{ '%.2f'|format(bp.base_salary) }}</td>
+      <td>RM {{ '%.2f'|format(bp.full_bonus_amount or 0) }}</td>
+      <td>{{ bp.months_worked }}/12</td>
+      <td style="font-weight:600;color:var(--g600)">RM {{ '%.2f'|format(bp.bonus_amount) }}</td>
+      <td>
+        {% if bp.status == 'Pending' %}<span class="badge badge-amber">Pending</span>
+        {% elif bp.status == 'Approved' %}<span class="badge badge-green">Approved</span>
+        {% elif bp.status == 'Rejected' %}<span class="badge badge-grey">Rejected</span>{% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-secondary)">No bonus proposals for {{ year }}. Generate yearly performance reviews first.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<div class="bulk-bar" id="bonus-bulk-bar">
+  <span id="bonus-bulk-count">0 selected</span>
+  <button type="submit" form="bonus-form" formaction="{{ url_for('year_end.approve_bonus') }}" class="btn" style="background:#16a34a;color:#fff">✓ Approve Selected</button>
+  <button type="button" class="btn" style="background:#dc2626;color:#fff" onclick="showRejectModal('bonus')">✕ Reject Selected</button>
+</div>
+</form>
+
+{% endif %}
+
+<div id="rejection-modal">
+  <div class="modal-box">
+    <h3 style="margin:0 0 12px">Rejection Reason</h3>
+    <textarea id="modal-reason" rows="3" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;resize:vertical;margin-bottom:12px" placeholder="Enter reason for rejection..."></textarea>
+    <div style="display:flex;gap:8px;justify-content:end">
+      <button type="button" class="btn btn-secondary btn-sm" onclick="closeRejectModal()">Cancel</button>
+      <button type="button" class="btn btn-danger btn-sm" onclick="submitReject()">Reject</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let rejectTab = '';
+
+function toggleAll(tab, el) {
+  const cls = tab === 'inc' ? '.inc-checkbox' : '.bonus-checkbox';
+  document.querySelectorAll(cls).forEach(cb => cb.checked = el.checked);
+  updateBulkBar(tab);
+}
+
+function updateBulkBar(tab) {
+  const cls = tab === 'inc' ? '.inc-checkbox' : '.bonus-checkbox';
+  const checked = document.querySelectorAll(cls + ':checked');
+  const bar = document.getElementById(tab + '-bulk-bar');
+  const count = document.getElementById(tab + '-bulk-count');
+  count.textContent = checked.length + ' selected';
+  bar.classList.toggle('show', checked.length > 0);
+}
+
+function showRejectModal(tab) {
+  rejectTab = tab;
+  document.getElementById('modal-reason').value = '';
+  document.getElementById('rejection-modal').classList.add('show');
+}
+
+function closeRejectModal() {
+  document.getElementById('rejection-modal').classList.remove('show');
+}
+
+function submitReject() {
+  const reason = document.getElementById('modal-reason').value.trim() || 'No reason provided';
+  document.getElementById('rejection-modal').classList.remove('show');
+
+  const formId = rejectTab === 'inc' ? 'inc-form' : 'bonus-form';
+  const form = document.getElementById(formId);
+  const actionUrl = rejectTab === 'inc'
+    ? '{{ url_for("year_end.reject_increment") }}'
+    : '{{ url_for("year_end.reject_bonus") }}';
+  form.action = actionUrl;
+
+  const reasonInput = document.createElement('input');
+  reasonInput.type = 'hidden';
+  reasonInput.name = 'rejection_reason';
+  reasonInput.value = reason;
+  form.appendChild(reasonInput);
+  form.submit();
+}
+</script>
+{% endblock %}

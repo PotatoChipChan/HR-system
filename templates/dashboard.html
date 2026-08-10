@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block head %}{% endblock %}
+
+{% block content %}
+{% if session.user_role == 'Employee' %}
+<!-- ESS DASHBOARD -->
+<div class="card">
+  <div class="sec-title">Welcome back, {{ emp.full_name }}!</div>
+  <div style="display:flex;gap:24px;flex-wrap:wrap">
+    <div style="flex:1;min-width:200px">
+      <div style="font-size:13px;color:var(--text-secondary);margin-bottom:4px">Position</div>
+      <div style="font-size:16px;font-weight:600">{{ emp.position or '—' }}</div>
+    </div>
+    <div style="flex:1;min-width:200px">
+      <div style="font-size:13px;color:var(--text-secondary);margin-bottom:4px">Department</div>
+      <div style="font-size:16px;font-weight:600">{{ dept.department_name if dept else '—' }}</div>
+    </div>
+    <div style="flex:1;min-width:200px">
+      <div style="font-size:13px;color:var(--text-secondary);margin-bottom:4px">Branch</div>
+      <div style="font-size:16px;font-weight:600">{{ branch.name if branch else '—' }}</div>
+    </div>
+  </div>
+</div>
+
+<!-- Employee Metrics Grid -->
+<div class="metric-grid">
+  <div class="metric-card">
+    <div class="metric-label">Leave Balance</div>
+    <div class="metric-val green-val">
+      {% set total_available = leave_balances | sum(attribute='available_days') %}
+      {{ "%.1f"|format(total_available) if total_available else "0" }}
+    </div>
+    <div class="metric-sub">Days available this year</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Pending Applications</div>
+    <div class="metric-val {% if own_pending|length >0 %}amber-val{% endif %}">
+      {{ own_pending|length }}
+    </div>
+    <div class="metric-sub">Awaiting review</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Last Payslip</div>
+    <div class="metric-val">
+      {% if recent_payslips|length > 0 %}
+        MYR {{ "%.2f"|format(recent_payslips[0].net_pay) }}
+      {% else %}
+        —
+      {% endif %}
+    </div>
+    <div class="metric-sub">Latest payroll</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Hours This Week</div>
+    <div class="metric-val">
+      {% set total_hours = recent_attendance | rejectattr('hours_worked', 'none') | sum(attribute='hours_worked') %}
+      {{ "%.1f"|format(total_hours) if total_hours else "0" }}
+    </div>
+    <div class="metric-sub">Logged hours</div>
+  </div>
+</div>
+
+<div class="two-col">
+  <!-- Leave Balances -->
+  <div class="card">
+    <div class="sec-title">Leave Balances</div>
+    {% if leave_balances %}
+      {% for bal in leave_balances %}
+      <div style="margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <div style="font-weight:600">{{ bal.type_name }}</div>
+          <div style="font-size:14px;color:var(--text-secondary)">
+            {{ "%.1f"|format(bal.available_days) }} / {{ "%.1f"|format(bal.entitled_days) }} days
+          </div>
+        </div>
+        <div class="prog">
+          <div class="prog-fill" style="width:{{ [100, (bal.used_days / bal.entitled_days * 100)|int if bal.entitled_days > 0 else 0]|min }}%"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:12px;color:var(--text-secondary)">
+          <div>Used: {{ "%.1f"|format(bal.used_days) }}</div>
+          <div>Pending: {{ "%.1f"|format(bal.pending_days) }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-state"><div class="icon">📅</div><p>No leave balances yet</p></div>
+    {% endif %}
+    <div class="btn-row" style="margin-top:12px;margin-bottom:0">
+      <a class="btn btn-primary btn-sm" href="{{ url_for('leave.apply') }}">Apply for Leave</a>
+    </div>
+  </div>
+
+  <!-- Recent Activity for Employee -->
+  <div class="card">
+    <div class="sec-title">Your Recent Activity</div>
+    {% if own_pending %}
+      <h4 style="margin-bottom:8px;font-size:14px;color:var(--text-secondary)">Pending Applications</h4>
+      <table class="tbl" style="margin-bottom:20px">
+        <thead><tr><th>Type</th><th>Reference</th><th>Status</th></tr></thead>
+        <tbody>
+          {% for item in own_pending %}
+          <tr>
+            <td>{{ item.type }}</td>
+            <td>{{ item.ref }}</td>
+            <td><span class="badge badge-amber">{{ item.status }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+    
+    {% if recent_payslips %}
+      <h4 style="margin-bottom:8px;font-size:14px;color:var(--text-secondary)">Recent Payslips</h4>
+      <table class="tbl">
+        <thead><tr><th>Period</th><th>Net Pay</th><th>Status</th></tr></thead>
+        <tbody>
+          {% for slip in recent_payslips %}
+          <tr>
+            <td>{{ slip.pay_period_month }}/{{ slip.pay_period_year }}</td>
+            <td>MYR {{ "%.2f"|format(slip.net_pay) }}</td>
+            <td><span class="badge {% if slip.status == 'Paid' %}badge-green{% else %}badge-grey{% endif %}">{{ slip.status }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+    
+    <div class="btn-row" style="margin-top:12px;margin-bottom:0;display:flex;gap:8px;">
+        <a class="btn btn-primary btn-sm" href="{{ url_for('invoice.list_invoices') }}">Submit Invoice</a>
+        <a class="btn btn-secondary btn-sm" href="{{ url_for('attendance.time_tracking') }}" style="background:var(--secondary-color, #475569);border-color:var(--secondary-color, #475569);color:white;">View Attendance</a>
+    </div>
+  </div>
+</div>
+
+{% else %}
+<!-- ADMIN/HR/MANAGER DASHBOARD -->
+<div class="ai-panel fade-in">
+  <div class="ai-tag">✨ AI Insight</div>
+  <p style="margin-top:6px;font-size:13px;color:#334155">
+    {% if pending_invoices > 0 %}<strong>{{ pending_invoices }} invoice{{ 's' if pending_invoices>1 }}</strong> pending OCR review · {% endif %}
+    {% if pending_leaves > 0 %}<strong>{{ pending_leaves }} leave request{{ 's' if pending_leaves>1 }}</strong> awaiting approval · {% endif %}
+    <strong>{{ on_leave }}</strong> employee{{ 's' if on_leave!=1 }} on leave today ·
+    Payroll month closes soon
+  </p>
+</div>
+
+<!-- KPI METRICS -->
+<div class="metric-grid">
+  <div class="metric-card">
+    <div class="metric-label">Total Active Employees</div>
+    <div class="metric-val green-val">{{ total_emp }}</div>
+    <div class="metric-sub">In your organisation</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">On Leave Today</div>
+    <div class="metric-val">{{ on_leave }}</div>
+    <div class="metric-sub">Current leave status</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Pending Invoices</div>
+    <div class="metric-val {% if pending_invoices>0 %}green-val{% endif %}">{{ pending_invoices }}</div>
+    <div class="metric-sub">Awaiting HR review</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Pending Approvals</div>
+    <div class="metric-val">{{ pending_leaves }}</div>
+    <div class="metric-sub">Leave requests</div>
+  </div>
+</div>
+
+<div class="two-col">
+  <!-- Recent Activity -->
+  <div class="card">
+    <div class="sec-title">Recent Activity</div>
+    {% if activity %}
+      {% for log in activity %}
+      <div class="timeline-item">
+        <div class="t-dot"></div>
+        <div class="t-body">
+          <div class="t-title">{{ log.description or log.action }}</div>
+          <div class="t-sub">
+            {{ log.full_name or 'System' }} · {{ log.module_name }} · {{ log.created_at[:16] }}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-state"><div class="icon">📋</div><p>No activity yet</p></div>
+    {% endif %}
+  </div>
+
+  <!-- Pending Approvals Queue -->
+  <div class="card">
+    <div class="sec-title">
+      Pending Queue
+    </div>
+    {% if pending_q %}
+    <table class="tbl">
+      <thead><tr><th>Type</th><th>Reference</th><th>Employee</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for item in pending_q %}
+        <tr>
+          <td>{{ item.type }}</td>
+          <td>
+            {% if item.type == 'Leave' %}
+              <a href="{{ url_for('leave.approve_list') }}" class="text-link" style="text-decoration:none;font-weight:600;">{{ item.ref or '—' }}</a>
+            {% elif item.type == 'Invoice' %}
+              <a href="{{ url_for('invoice.claims_management') }}" class="text-link" style="text-decoration:none;font-weight:600;">{{ item.ref or '—' }}</a>
+            {% elif item.type == 'Bonus' %}
+              <a href="{{ url_for('bonus.list_bonuses') }}" class="text-link" style="text-decoration:none;font-weight:600;">{{ item.ref or '—' }}</a>
+            {% elif item.type == 'Increment' %}
+              <a href="{{ url_for('increment.list_increments') }}" class="text-link" style="text-decoration:none;font-weight:600;">{{ item.ref or '—' }}</a>
+
+            {% elif item.type == 'Application' %}
+              <a href="{{ url_for('recruitment.list_applications') }}" class="text-link" style="text-decoration:none;font-weight:600;">{{ item.ref or '—' }}</a>
+            {% else %}
+              {{ item.ref or '—' }}
+            {% endif %}
+          </td>
+          <td>{{ item.owner }}</td>
+          <td><span class="badge badge-amber">{{ item.status }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <div class="empty-state"><div class="icon">✅</div><p>No pending items</p></div>
+    {% endif %}
+    {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+    <div class="btn-row" style="margin-top:12px;margin-bottom:0;display:flex;gap:8px;flex-wrap:wrap;">
+      <a class="btn btn-primary btn-sm" href="{{ url_for('leave.approve_list') }}">Leave</a>
+      <a class="btn btn-secondary btn-sm" href="{{ url_for('invoice.claims_management') }}" style="background:var(--secondary-color, #475569);border-color:var(--secondary-color, #475569);color:white;">Claims</a>
+      <a class="btn btn-secondary btn-sm" href="{{ url_for('recruitment.list_applications') }}" style="background:#6366f1;border-color:#6366f1;color:white;">Applications</a>
+
+      {% if session.user_role in ['Admin','HR Director','HR Manager'] %}
+      <a class="btn btn-secondary btn-sm" href="{{ url_for('bonus.list_bonuses') }}" style="background:#10b981;border-color:#10b981;color:white;">Bonuses</a>
+      <a class="btn btn-secondary btn-sm" href="{{ url_for('increment.list_increments') }}" style="background:#8b5cf6;border-color:#8b5cf6;color:white;">Increments</a>
+      {% endif %}
+    </div>
+    {% elif session.user_role == 'Manager' %}
+    <div class="btn-row" style="margin-top:12px;margin-bottom:0">
+      <a class="btn btn-primary btn-sm" href="{{ url_for('leave.approve_list') }}">Open Leave Approvals</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Department Distribution -->
+{% if dept_dist %}
+<div class="card">
+  <div class="sec-title">Department Distribution</div>
+  <div style="display:flex;gap:32px;flex-wrap:wrap">
+    {% for d in dept_dist %}
+    <div style="min-width:120px">
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">{{ d.department_name }}</div>
+      <div style="font-size:22px;font-weight:700;font-family:'Space Grotesk',sans-serif;color:var(--g600)">{{ d.cnt }}</div>
+      <div class="prog" style="margin-top:6px">
+        <div class="prog-fill" style="width:{{ [100, (d.cnt / total_emp * 100)|int if total_emp else 0]|min }}%"></div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var toasts = ['increment-toast', 'bonus-toast', 'apps-toast', 'leave-toast', 'invoice-toast'];
+  toasts.forEach(function(id) {
+    var toast = document.getElementById(id);
+    if (toast) {
+      setTimeout(function() { toast.classList.add('show'); }, 300);
+      setTimeout(function() {
+        toast.classList.remove('show');
+        setTimeout(function() { toast.classList.add('collapsed'); }, 400);
+      }, 6000);
+    }
+  });
+});
+</script>
+{% endblock %}

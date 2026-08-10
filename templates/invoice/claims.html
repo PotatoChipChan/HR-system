@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}Claims Management{% endblock %}
+{% block page_title %}Claims Management{% endblock %}
+
+{% block content %}
+<div class="metric-grid" style="margin-bottom:20px">
+  <div class="metric-card"><div class="metric-label">Pending Review</div><div class="metric-val" style="color:{% if stats.pending>0 %}#854f0b{% else %}var(--g600){% endif %}">{{ stats.pending or 0 }}</div></div>
+  <div class="metric-card"><div class="metric-label">Approved</div><div class="metric-val green-val">{{ stats.approved or 0 }}</div></div>
+  <div class="metric-card"><div class="metric-label">Rejected</div><div class="metric-val" style="color:#a32d2d">{{ stats.rejected or 0 }}</div></div>
+  <div class="metric-card"><div class="metric-label">Total Approved Amount</div><div class="metric-val green-val" style="font-size:18px">RM {{ '%.2f'|format(stats.total_approved or 0) }}</div></div>
+</div>
+
+<div class="card fade-in">
+  <div class="sec-title">
+    Claim Approvals
+    <div class="filter-bar" style="margin-bottom:0">
+      <form method="GET" style="display:flex;gap:8px">
+        <select name="status" class="form-input" onchange="this.form.submit()">
+          <option value="" {% if not status_f %}selected{% endif %}>All Status</option>
+          <option value="Pending"  {% if status_f=='Pending'  %}selected{% endif %}>Pending</option>
+          <option value="Approved" {% if status_f=='Approved' %}selected{% endif %}>Approved</option>
+          <option value="Rejected" {% if status_f=='Rejected' %}selected{% endif %}>Rejected</option>
+        </select>
+      </form>
+    </div>
+  </div>
+  {% if invoices %}
+        <table class="tbl">
+          <thead><tr><th>Employee</th><th>Invoice #</th><th>Vendor</th><th>Amount</th><th>Status</th><th>Action</th><th></th></tr></thead>
+          <tbody>
+            {% for i in invoices %}
+            <tr>
+              <td>{{ i.full_name }}<div style="font-size:11px;color:var(--text-secondary)">{{ i.position or '' }}</div></td>
+              <td style="font-family:monospace;font-size:12px">{{ i.invoice_number or ('INV-'+('%04d'|format(i.invoice_id))) }}</td>
+              <td>{{ i.vendor_name or '—' }}</td>
+              <td style="font-weight:600">
+                {{ i.currency or 'MYR' }} {{ '%.2f'|format(i.total_amount or 0) }}
+                {% if (i.currency or 'MYR') != 'MYR' and i.total_amount_myr %}
+                <br><span style="font-size:11px;color:var(--text-secondary)">≈ RM {{ '%.2f'|format(i.total_amount_myr) }}</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if i.status=='Approved' %}<span class="badge badge-green">Approved</span>
+                {% elif i.status=='Rejected' %}<span class="badge badge-red">Rejected</span>
+                {% elif i.status=='Paid' %}<span class="badge badge-blue">Paid</span>
+                {% else %}<span class="badge badge-amber">Pending</span>{% endif %}
+              </td>
+              <td style="white-space:nowrap">
+                {% if i.status=='Pending' %}
+                <form method="POST" action="{{ url_for('invoice.approve', iid=i.invoice_id) }}" style="display:inline">
+                  <button class="btn btn-sm btn-primary" type="submit">Approve</button>
+                </form>
+                <button class="btn btn-sm btn-danger" onclick="showRejectModal({{ i.invoice_id }})">Reject</button>
+                {% endif %}
+              </td>
+              <td style="white-space:nowrap; text-align:right;">
+                <button class="btn btn-sm" type="button" onclick="viewDetails({{ i.invoice_id }})">Details</button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+  {% else %}
+  <div class="empty-state"><div class="icon">🧾</div><p>No claims found</p></div>
+  {% endif %}
+</div>
+
+<div class="modal-backdrop" id="rejectModal">
+  <div class="modal-card">
+    <div class="modal-title">Reject Claim <button class="btn btn-sm" onclick="document.getElementById('rejectModal').classList.remove('show')">✕</button></div>
+    <form method="POST" id="rejectForm">
+      <div class="form-group">
+        <label class="form-label">Rejection Reason *</label>
+        <textarea class="form-input" name="reason" rows="3" required placeholder="Explain why this claim is rejected..."></textarea>
+      </div>
+      <div class="btn-row"><button class="btn btn-danger" type="submit">Confirm Reject</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="detailsModal">
+  <div class="modal-card" style="max-width:720px;max-height:90vh;overflow:auto">
+    <div class="modal-title">Claim Details <button class="btn btn-sm" onclick="document.getElementById('detailsModal').classList.remove('show')">✕</button></div>
+    <div id="detailsBody">
+      <p style="color:var(--text-secondary)">Loading...</p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const DETAILS_URL = '/invoices/';
+
+function esc(s) {
+  if (s == null || s === '') return '—';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+function money(n, currency='MYR') {
+  const v = parseFloat(n);
+  return isNaN(v) ? '—' : `${currency} ` + v.toFixed(2);
+}
+
+function detailRow(label, value) {
+  return `<div style="display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid #eef1f6">
+    <span style="color:var(--text-secondary);font-size:13px">${esc(label)}</span>
+    <span style="font-size:13px;font-weight:500;text-align:right">${value}</span>
+  </div>`;
+}
+
+function showRejectModal(iid){
+  document.getElementById('rejectForm').action='/invoices/'+iid+'/reject';
+  document.getElementById('rejectModal').classList.add('show');
+}
+document.getElementById('rejectModal').addEventListener('click', function(e){
+  if(e.target===this) this.classList.remove('show');
+});
+document.getElementById('detailsModal').addEventListener('click', function(e){
+  if(e.target===this) this.classList.remove('show');
+});
+
+async function viewDetails(iid){
+  const modal = document.getElementById('detailsModal');
+  const body = document.getElementById('detailsBody');
+  body.innerHTML = '<p style="color:var(--text-secondary)">Loading...</p>';
+  modal.classList.add('show');
+  try {
+    const resp = await fetch(DETAILS_URL + iid + '/details', {
+      headers: { 'Accept': 'application/json' },
+      credentials: 'same-origin'
+    });
+    const ct = resp.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      body.innerHTML = '<p style="color:#a32d2d">Could not load details. Please refresh the page and try again.</p>';
+      return;
+    }
+    const data = await resp.json();
+    if (!resp.ok) {
+      body.innerHTML = `<p style="color:#a32d2d">${esc(data.error || 'Could not load details.')}</p>`;
+      return;
+    }
+
+    let html = '<div style="margin-bottom:16px">';
+    const empLabel = esc(data.employee_name) + (data.employee_position ? ' (' + esc(data.employee_position) + ')' : '');
+    html += detailRow('Employee', empLabel);
+    html += detailRow('Email', esc(data.employee_email));
+    html += detailRow('Status', esc(data.status));
+    html += detailRow('Submitted', esc(data.submitted_at));
+    html += '</div>';
+
+    html += '<div class="sec-title" style="font-size:14px;margin:12px 0 8px">Invoice submission</div>';
+    html += detailRow('Vendor Name', esc(data.vendor_name));
+    html += detailRow('Invoice Number', esc(data.invoice_number));
+    html += detailRow('Invoice Date', esc(data.invoice_date));
+    html += detailRow('Due Date', esc(data.due_date));
+    html += detailRow('Currency', esc(data.currency || 'MYR'));
+    html += detailRow('Subtotal', money(data.subtotal, data.currency || 'MYR'));
+    html += detailRow('Tax Amount', money(data.tax_amount, data.currency || 'MYR'));
+    html += detailRow('Total Amount', money(data.total_amount, data.currency || 'MYR'));
+    if ((data.currency || 'MYR') !== 'MYR') {
+      html += detailRow('Exchange Rate (1 ' + esc(data.currency) + ')', data.exchange_rate ? data.exchange_rate.toFixed(4) : '—');
+      html += detailRow('Total Amount (MYR)', money(data.total_amount_myr, 'MYR'));
+    }
+    html += detailRow('Category', esc(data.category));
+    html += detailRow('Description', esc(data.description));
+
+    html += '<div class="sec-title" style="font-size:14px;margin:16px 0 8px">Supporting document</div>';
+    html += detailRow('File', esc(data.original_name));
+    if (data.document_url) {
+      html += `<p style="margin-top:100px"><a class="btn btn-sm btn-primary" href="${data.document_url}" target="_blank" rel="noopener">Open uploaded document</a></p>`;
+    }
+
+    if (data.approved_by_name || data.approved_at) {
+      html += '<div class="sec-title" style="font-size:14px;margin:16px 0 8px">Review</div>';
+      html += detailRow('Reviewed by', esc(data.approved_by_name));
+      html += detailRow('Reviewed at', esc(data.approved_at));
+    }
+    if (data.rejection_reason) {
+      html += detailRow('Rejection reason', esc(data.rejection_reason));
+    }
+
+    body.innerHTML = html;
+  } catch (err) {
+    body.innerHTML = `<p style="color:#a32d2d">Unable to load details: ${esc(err.message)}</p>`;
+  }
+}
+</script>
+{% endblock %}

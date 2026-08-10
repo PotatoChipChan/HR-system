@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Contract – {{ app.applicant_name }}{% endblock %}
+{% block page_title %}Employment Contract{% endblock %}
+{% block content %}
+<div class="card fade-in">
+  <div class="sec-title">{{ app.applicant_name }} – {{ app.job_title }}</div>
+  <form method="POST">
+    <div class="form-row">
+      <div class="form-group"><label class="label">Offer Date*</label><input class="form-input" name="offer_date" type="date" value="{{ contract.offer_date if contract else '' }}" required></div>
+      <div class="form-group"><label class="label">Start Date*</label><input class="form-input" name="start_date" type="date" value="{{ contract.start_date if contract else '' }}" required></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="label">Position*</label><input class="form-input" name="position" value="{{ contract.position if contract else app.job_title }}" required></div>
+      <div class="form-group"><label class="label">Department*</label>
+        <select class="form-input" name="department_id" required>
+          {% for d in departments %}
+          <option value="{{ d.department_id }}" {{ 'selected' if contract and contract.department_id==d.department_id }}>{{ d.department_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="label">Work Start Time</label><input class="form-input" name="work_start_time" type="time" value="{{ contract.work_start_time if contract else '09:00' }}"></div>
+      <div class="form-group"><label class="label">Work End Time</label><input class="form-input" name="work_end_time" type="time" value="{{ contract.work_end_time if contract else '18:00' }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="label">Base Salary (RM)*</label><input class="form-input" name="base_salary" type="number" step="0.01" value="{{ contract.base_salary if contract else '' }}" required></div>
+      <div class="form-group"><label class="label">Employment Type*</label>
+        <select class="form-input" name="employment_type" required>
+          <option value="Full-Time" {{ 'selected' if contract and contract.employment_type=='Full-Time' }}>Full-Time</option>
+          <option value="Part-Time" {{ 'selected' if contract and contract.employment_type=='Part-Time' }}>Part-Time</option>
+          <option value="Contract" {{ 'selected' if contract and contract.employment_type=='Contract' }}>Contract</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:16px">
+      <button class="btn btn-primary" type="submit">Save Contract Draft</button>
+      <a href="{{ url_for('recruitment.view_application', aid=app.application_id) }}" class="btn">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

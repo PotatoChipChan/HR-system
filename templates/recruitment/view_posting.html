@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}{{ posting.title }}{% endblock %}
+{% block page_title %}{{ posting.title }}{% endblock %}
+{% block content %}
+<div class="card fade-in" style="margin-bottom:20px">
+  <div style="font-size:12px;margin-bottom:12px;color:var(--text-secondary)">
+    <a href="{{ url_for('recruitment.list_postings') }}" style="color:var(--g600)">‹ Back to Postings</a>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:start">
+    <div>
+      <p><strong>Department:</strong> {{ posting.department_name }} &middot; <strong>Branch:</strong> {{ posting.branch_name }}</p>
+      <p><strong>Type:</strong> {{ posting.employment_type }} &middot; <strong>Status:</strong> {{ posting.status }} &middot; <strong>Posted by:</strong> {{ posting.posted_by_name }}</p>
+      {% if posting.min_salary %}<p><strong>Salary:</strong> RM{{ posting.min_salary }}{% if posting.max_salary %} – RM{{ posting.max_salary }}{% endif %}</p>{% endif %}
+    </div>
+    <div>
+      <a href="{{ url_for('recruitment.public_apply', pid=posting.posting_id) }}" class="btn btn-primary">Apply Now</a>
+    </div>
+  </div>
+   <h4>Description</h4><p>{{ posting.description or 'No description.' }}</p>
+   <h4>Requirements</h4><p>{{ posting.requirements or 'No requirements specified.' }}</p>
+</div>
+
+{% if session['user_role'] in ('Admin','HR','HR Manager','HR Director') %}
+<div class="card fade-in" style="margin-bottom:20px;border-left:4px solid #1a6b3a">
+  <div class="sec-title">External Application Instructions</div>
+  <p style="color:var(--text-secondary);font-size:14px;margin-bottom:12px">Copy the format below to JobStreet, LinkedIn, or other external platforms. Candidates can also apply via the <a href="{{ url_for('recruitment.careers') }}" target="_blank">Careers Page ↗</a>.</p>
+  <div style="background:#f5f5f5;border:1px solid #e0e0e0;border-radius:8px;padding:16px;font-family:monospace;font-size:13px;white-space:pre-wrap;margin-bottom:12px">To apply, send your application to <strong>careers@smarthr.my</strong> with this format:
+
+Name: [Your full name]
+Position: {{ posting.title }}
+Email: [Your email address]
+IC: [Your IC number]
+Phone: [Your contact number]
+Address: [Your address]
+
+[Attach your CV and write your cover letter below]
+---
+[Ref: POST-{{ posting.posting_id }}]</div>
+  <button class="btn btn-sm" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy to Clipboard',2000)">Copy to Clipboard</button>
+</div>
+{% endif %}
+
+<div class="card fade-in">
+  <div class="sec-title">
+    Applications ({{ applications|length }})
+    {% if session['user_role'] in ('Admin','HR','HR Manager') %}
+    {% if new_count > 0 %}
+    <form method="POST" action="{{ url_for('recruitment.reject_non_shortlisted', pid=posting.posting_id) }}" style="display:inline;margin-left:12px" onsubmit="return confirm('Reject all {{ new_count }} non-shortlisted candidates? Rejection emails will be sent to each.')">
+      <button class="btn btn-sm btn-outline-danger" type="submit">🗑️ Reject {{ new_count }} Non-Shortlisted</button>
+    </form>
+    {% endif %}
+    {% endif %}
+  </div>
+
+  {% if applications %}
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Name</th>
+        <th>Email</th>
+        <th>Status</th>
+        <th>AI Score</th>
+        <th>AI Summary</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in applications %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td><strong>{{ a.applicant_name }}</strong></td>
+        <td>{{ a.applicant_email }}</td>
+        <td><span class="badge {% if a.status=='Shortlisted' %}badge-green{% elif a.status=='Hired' %}badge-green{% elif a.status=='Rejected' %}badge-red{% elif a.status=='Interview' %}badge-blue{% endif %}">{{ a.status }}</span></td>
+        <td>
+          {% if a.ai_score is not none %}
+          <span style="font-weight:600;color:{% if a.ai_score >= 30 %}#1a6b3a{% elif a.ai_score >= 15 %}#b8860b{% else %}#a32d2d{% endif %}">
+            {{ a.ai_score }}
+          </span>
+          {% else %}
+          <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+        <td style="font-size:13px;color:#555;max-width:300px">{{ a.ai_summary or '—' }}</td>
+        <td><a href="{{ url_for('recruitment.view_application', aid=a.application_id) }}" class="btn btn-sm">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><div class="icon">📄</div><h3>No applications yet</h3></div>
+  {% endif %}
+
+  {% if session['user_role'] in ('Admin','HR') %}
+  <hr>
+  <h4>Add Application Manually</h4>
+  <form method="POST" action="{{ url_for('recruitment.add_application', pid=posting.posting_id) }}" style="display:flex;flex-wrap:wrap;gap:8px;align-items:end">
+    <div><label class="label" style="font-size:12px">Name *</label><input class="form-input" name="applicant_name" required></div>
+    <div><label class="label" style="font-size:12px">Email *</label><input class="form-input" name="applicant_email" type="email" required></div>
+    <div><label class="label" style="font-size:12px">Phone</label><input class="form-input" name="applicant_phone"></div>
+    <div><label class="label" style="font-size:12px">Cover Letter</label><textarea class="form-input" name="cover_letter" rows="1" style="width:250px"></textarea></div>
+    <button class="btn btn-sm btn-primary" type="submit">Add Application</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

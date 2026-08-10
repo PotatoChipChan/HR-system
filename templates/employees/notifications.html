@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Notifications - SmartHR{% endblock %}
+{% block page_title %}Your Notifications{% endblock %}
+
+{% block content %}
+<div style="max-width: 800px; margin: 0 auto;">
+    <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+        <p style="color: var(--text-secondary);">Stay updated with important system notifications</p>
+        {% if notifications %}
+        <form method="POST" action="{{ url_for('employees.mark_all_notifications_read') }}" style="display: inline;">
+            <button type="submit" class="btn btn-sm">Mark All as Read</button>
+        </form>
+        {% endif %}
+    </div>
+
+    {% if not notifications %}
+    <div class="card" style="text-align: center; padding: 40px;">
+        <div style="font-size: 48px; margin-bottom: 16px;">📭</div>
+        <h3>No Notifications</h3>
+        <p style="color: var(--text-secondary);">You're all caught up! No new notifications.</p>
+    </div>
+    {% else %}
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+        {% for notif in notifications %}
+        {% set link = notif.related_url %}
+        {% if link %}
+        <a href="{{ link }}" style="text-decoration: none; color: inherit;">
+        {% endif %}
+            <div class="card fade-in" style="border-left: 4px solid {% if not notif.is_read %}var(--success-color){% else %}var(--border-color){% endif %}; {% if link %}cursor: pointer;{% endif %}">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
+                    <div style="flex: 1;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                            <span style="font-size: 12px; padding: 2px 8px; border-radius: 12px; 
+                                {% if notif.type == 'Success' %}background: #2ecc71; color: white;
+                                {% elif notif.type == 'Warning' %}background: #f39c12; color: white;
+                                {% elif notif.type == 'Error' %}background: #e74c3c; color: white;
+                                {% else %}background: #3498db; color: white;{% endif %}">
+                                {{ notif.type }}
+                            </span>
+                            <strong>{{ notif.title }}</strong>
+                            {% if not notif.is_read %}
+                            <span style="font-size: 12px; padding: 2px 8px; background: var(--success-color); color: white; border-radius: 12px;">NEW</span>
+                            {% endif %}
+                        </div>
+                        <p style="margin: 0 0 8px 0;">{{ notif.message }}</p>
+                        <small style="color: var(--text-secondary);">{{ notif.created_at }}</small>
+                    </div>
+                    
+                    {% if not notif.is_read and notif.notification_id %}
+                    <form method="POST" action="{{ url_for('employees.mark_notification_read', notif_id=notif.notification_id) }}" onclick="event.stopPropagation();">
+                        <button type="submit" class="btn btn-sm">Mark Read</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+        {% if link %}
+        </a>
+        {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

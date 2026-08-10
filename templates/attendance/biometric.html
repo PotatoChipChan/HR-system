@@ -1,0 +1,375 @@
+{% extends "base.html" %}
+{% block title %}Face Biometric{% endblock %}
+{% block page_title %}Face Biometric Attendance{% endblock %}
+{% block content %}
+<div class="ai-panel fade-in">
+  <div class="ai-tag">🔒 Biometric Authentication</div>
+  <p style="margin-top:8px;font-size:13px">Click <strong>Check In</strong> or <strong>Check Out</strong> to activate the camera and verify your face.</p>
+</div>
+<div class="two-col">
+  <div>
+    <div class="cam-box" id="cam-container">
+      <div class="cam-placeholder" id="cam-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;text-align:center;padding:20px;">
+        <div>📷 Click <strong>Check In</strong> or <strong>Check Out</strong> to start</div>
+      </div>
+      <video id="webcam" autoplay playsinline style="width:100%; height:100%; object-fit:cover; border-radius:18px;display:none;"></video>
+      <div class="face-frame" id="scan-overlay"><div class="scan-line"></div></div>
+      <div class="confidence-bar-wrap" id="confidence-wrap" style="display:none">
+        <div class="confidence-bar" id="confidence-bar"></div>
+      </div>
+      <div class="cam-status" id="status-text">🟡 Click Check In or Check Out to start</div>
+      <canvas id="snapshot" style="display:none;"></canvas>
+    </div>
+    <div class="btn-row" style="margin-top:16px">
+      <button class="btn btn-primary" id="btn-in" {% if not can_check_in %}disabled{% endif %}>Check In</button>
+      <button class="btn btn-primary" id="btn-out" {% if not can_check_out %}disabled{% endif %}>Check Out</button>
+      {% if session.user_role in ['Admin','HR Director','HR Manager'] %}
+      <button class="btn" id="btn-reg">Register Face</button>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card">
+    <div class="sec-title">Live Verification</div>
+    <div class="verify-stats">
+      <div class="verify-stat">
+        <span class="verify-stat-label">Status</span>
+        <span class="verify-stat-val" id="live-status">Waiting for camera</span>
+      </div>
+      <div class="verify-stat">
+        <span class="verify-stat-label">Confidence</span>
+        <span class="verify-stat-val" id="live-confidence">—</span>
+      </div>
+      <div class="verify-stat">
+        <span class="verify-stat-label">Face</span>
+        <span class="verify-stat-val" id="live-face">—</span>
+      </div>
+      <div class="verify-stat">
+        <span class="verify-stat-label">Failed</span>
+        <span class="verify-stat-val" id="live-attempts">{{ failed_attempts }}/3</span>
+      </div>
+    </div>
+    <div id="manual-fallback-banner" class="manual-fallback-banner" style="display:none">
+      <p>Biometric check-in failed 3 times.</p>
+      <button type="button" class="btn btn-primary btn-sm" id="btn-open-manual">Click here for Manual Attendance</button>
+    </div>
+    <div id="bio-feedback" class="empty-state" style="padding:20px;">
+      <div class="icon">📸</div>
+      <p>Position your face within the frame. Verification runs automatically every second.</p>
+    </div>
+    <div id="bio-results" style="display:none;">
+      <div class="timeline-item">
+        <div class="t-dot" id="result-dot"></div>
+        <div class="t-body">
+          <div class="t-title" id="result-title">Success</div>
+          <div class="t-sub" id="result-msg">Check-in confirmed.</div>
+        </div>
+      </div>
+    </div>
+    <div class="sec-title" style="margin-top:20px">Recent Activity</div>
+    <div id="activity-log" class="activity-log">
+      <div class="text-muted" style="font-size:12px">Verification events appear here.</div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="manual-modal" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-labelledby="manual-modal-title">
+    <div class="modal-title">
+      <span id="manual-modal-title">Manual Attendance Required</span>
+      <button type="button" class="btn btn-sm" id="btn-close-manual" aria-label="Close">✕</button>
+    </div>
+    <div class="alert alert-warning">
+      Face verification failed 3 times. Please use manual attendance instead.
+    </div>
+    {% if can_manual_override %}
+    <p style="font-size:13px;margin-bottom:16px">As HR/Admin, you can record a manual attendance entry for any employee.</p>
+    <a href="{{ url_for('attendance.manual') }}?reason=Biometric+failed+(3+attempts)" class="btn btn-primary" style="width:100%;text-align:center">
+      Click here for Manual Attendance
+    </a>
+    {% else %}
+    <p style="font-size:13px;margin-bottom:16px">Submit your check-in time below. HR will review and approve the entry.</p>
+    <div class="form-group">
+      <label class="form-label">Check-in Time</label>
+      <input class="form-input" type="time" id="manual-time" required>
+    </div>
+    <button type="button" class="btn btn-primary" id="btn-submit-manual" style="width:100%">
+      Click here to Submit Manual Attendance
+    </button>
+    <p id="manual-form-error" class="text-muted" style="font-size:12px;margin-top:12px;display:none;color:#a32d2d"></p>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+const video = document.getElementById('webcam');
+const canvas = document.getElementById('snapshot');
+const statusText = document.getElementById('status-text');
+const btnIn = document.getElementById('btn-in');
+const btnOut = document.getElementById('btn-out');
+const btnReg = document.getElementById('btn-reg');
+const scanOverlay = document.getElementById('scan-overlay');
+const confidenceWrap = document.getElementById('confidence-wrap');
+const confidenceBar = document.getElementById('confidence-bar');
+const camContainer = document.getElementById('cam-container');
+const camPlaceholder = document.getElementById('cam-placeholder');
+
+const VERIFY_URL = '{{ url_for("attendance.verify_face") }}';
+const REGISTER_URL = '{{ url_for("attendance.register_face") }}';
+const STATUS_URL = '{{ url_for("attendance.attendance_status") }}';
+const MANUAL_SELF_URL = '{{ url_for("attendance.manual_self") }}';
+const THRESHOLD = 55;
+const MAX_FAILED_ATTEMPTS = 3;
+
+let recording = false;
+let cameraActive = false;
+let failedCheckInAttempts = {{ failed_attempts }};
+let manualModalShown = false;
+let state = {
+  can_check_in: {{ 'true' if can_check_in else 'false' }},
+  can_check_out: {{ 'true' if can_check_out else 'false' }},
+  face_registered: {{ 'true' if face_registered else 'false' }}
+};
+
+async function initWebcam() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
+    video.srcObject = stream;
+    video.style.display = 'block';
+    camPlaceholder.style.display = 'none';
+    cameraActive = true;
+    statusText.textContent = '🟢 Camera Active — Verifying';
+    statusText.style.color = '#5aaa3c';
+    document.getElementById('live-status').textContent = 'Scanning';
+    return true;
+  } catch (err) {
+    statusText.textContent = '🔴 Camera Error: ' + err.message;
+    statusText.style.color = '#a32d2d';
+    document.getElementById('live-status').textContent = 'Camera error';
+    return false;
+  }
+}
+
+function stopWebcam() {
+  if (video.srcObject) {
+    video.srcObject.getTracks().forEach(track => track.stop());
+    video.srcObject = null;
+  }
+  video.style.display = 'none';
+  camPlaceholder.style.display = 'flex';
+  cameraActive = false;
+}
+
+function captureFrame() {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0);
+  return canvas.toDataURL('image/jpeg', 0.8);
+}
+
+function setButtonState(data) {
+  if (data.can_check_in !== undefined) state.can_check_in = data.can_check_in;
+  if (data.can_check_out !== undefined) state.can_check_out = data.can_check_out;
+  if (data.face_registered !== undefined) state.face_registered = data.face_registered;
+  btnIn.disabled = !state.can_check_in;
+  btnOut.disabled = !state.can_check_out;
+}
+
+function updateAttemptDisplay() {
+  document.getElementById('live-attempts').textContent = failedCheckInAttempts + '/3';
+  const banner = document.getElementById('manual-fallback-banner');
+  if (failedCheckInAttempts >= MAX_FAILED_ATTEMPTS) {
+    banner.style.display = 'block';
+    showManualFallbackModal();
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+function showManualFallbackModal() {
+  if (manualModalShown) return;
+  manualModalShown = true;
+  document.getElementById('manual-modal').classList.add('show');
+  document.getElementById('manual-modal').setAttribute('aria-hidden', 'false');
+  statusText.textContent = '⚠️ Use manual attendance';
+  showResult(false, 'Biometric check-in failed 3 times. Please use manual attendance.');
+}
+
+function hideManualFallbackModal() {
+  manualModalShown = false;
+  document.getElementById('manual-modal').classList.remove('show');
+  document.getElementById('manual-modal').setAttribute('aria-hidden', 'true');
+}
+
+function handleVerifyFailure(data, action) {
+  if (action !== 'check_in') {
+    showResult(false, data.error);
+    statusText.textContent = '🔴 Failed';
+    return;
+  }
+  if (data.failed_attempts !== undefined) {
+    failedCheckInAttempts = data.failed_attempts;
+  } else {
+    failedCheckInAttempts++;
+  }
+  updateAttemptDisplay();
+  showResult(false, data.error + ` (Attempt ${failedCheckInAttempts}/${MAX_FAILED_ATTEMPTS})`);
+  statusText.textContent = failedCheckInAttempts >= MAX_FAILED_ATTEMPTS
+    ? '⚠️ Switch to manual attendance'
+    : '🔴 Check-in failed';
+}
+
+async function submitManualSelf() {
+  const timeInput = document.getElementById('manual-time');
+  const errEl = document.getElementById('manual-form-error');
+  errEl.style.display = 'none';
+  try {
+    const resp = await fetch(MANUAL_SELF_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        time: timeInput ? timeInput.value : null,
+        reason: 'Biometric failed (3 attempts)'
+      })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      hideManualFallbackModal();
+      failedCheckInAttempts = 0;
+      updateAttemptDisplay();
+      showResult(true, data.message);
+      statusText.textContent = '🟢 Manual check-in submitted';
+      await refreshStatus();
+    } else {
+      errEl.textContent = data.error;
+      errEl.style.display = 'block';
+    }
+  } catch (err) {
+    errEl.textContent = 'Network error: ' + err.message;
+    errEl.style.display = 'block';
+  }
+}
+
+function setDefaultManualTime() {
+  const timeInput = document.getElementById('manual-time');
+  if (!timeInput) return;
+  const now = new Date();
+  timeInput.value = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+}
+
+async function refreshStatus() {
+  try {
+    const resp = await fetch(STATUS_URL);
+    const data = await resp.json();
+    setButtonState(data);
+    if (!data.face_registered) {
+      document.getElementById('live-status').textContent = 'Not registered';
+    }
+    return data;
+  } catch (err) {
+    return null;
+  }
+}
+
+function addActivity(msg, success) {
+  const log = document.getElementById('activity-log');
+  const entry = document.createElement('div');
+  entry.className = 'activity-entry ' + (success ? 'success' : 'fail');
+  entry.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+  log.insertBefore(entry, log.firstChild);
+  while (log.children.length > 8) log.removeChild(log.lastChild);
+}
+
+function showResult(success, message) {
+  document.getElementById('bio-feedback').style.display = 'none';
+  const resDiv = document.getElementById('bio-results');
+  resDiv.style.display = 'block';
+  document.getElementById('result-dot').style.background = success ? '#5aaa3c' : '#a32d2d';
+  document.getElementById('result-title').textContent = success ? 'Success' : 'Error';
+  document.getElementById('result-msg').textContent = message;
+  addActivity(message, success);
+}
+
+async function recordAttendance(action) {
+  if (recording) return;
+  recording = true;
+  statusText.textContent = '🟡 Initialising camera...';
+  document.getElementById('live-status').textContent = 'Starting camera...';
+
+  const ok = await initWebcam();
+  if (!ok) { recording = false; return; }
+
+  await new Promise(r => setTimeout(r, 1500));
+
+  statusText.textContent = '⌛ Recording ' + (action === 'check_in' ? 'check-in' : 'check-out') + '...';
+  try {
+    const resp = await fetch(VERIFY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: captureFrame(), action })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      showResult(true, data.message);
+      statusText.textContent = '🟢 ' + (action === 'check_in' ? 'Checked In' : 'Checked Out');
+      if (action === 'check_in') {
+        failedCheckInAttempts = 0;
+        updateAttemptDisplay();
+        hideManualFallbackModal();
+      }
+      await refreshStatus();
+    } else {
+      handleVerifyFailure(data, action);
+    }
+  } catch (err) {
+    showResult(false, 'Network error: ' + err.message);
+  } finally {
+    stopWebcam();
+    recording = false;
+    statusText.textContent = '🟡 Click Check In or Check Out to start';
+  }
+}
+
+if (btnReg) {
+  btnReg.onclick = async () => {
+    recording = true;
+    const ok = await initWebcam();
+    if (!ok) { recording = false; return; }
+    await new Promise(r => setTimeout(r, 1500));
+    statusText.textContent = '⌛ Registering face...';
+    try {
+      const resp = await fetch(REGISTER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: captureFrame() })
+      });
+      const data = await resp.json();
+      showResult(data.success, data.message || data.error);
+      statusText.textContent = data.success ? '🟢 Face Registered' : '🔴 Registration Failed';
+      if (data.success) await refreshStatus();
+    } catch (err) {
+      showResult(false, err.message);
+    } finally {
+      stopWebcam();
+      recording = false;
+    }
+  };
+}
+
+btnIn.onclick = () => recordAttendance('check_in');
+btnOut.onclick = () => recordAttendance('check_out');
+
+document.getElementById('btn-open-manual').onclick = showManualFallbackModal;
+document.getElementById('btn-close-manual').onclick = hideManualFallbackModal;
+document.getElementById('manual-modal').onclick = (e) => {
+  if (e.target.id === 'manual-modal') hideManualFallbackModal();
+};
+const submitManualBtn = document.getElementById('btn-submit-manual');
+if (submitManualBtn) submitManualBtn.onclick = submitManualSelf;
+
+refreshStatus();
+setDefaultManualTime();
+updateAttemptDisplay();
+if (failedCheckInAttempts >= MAX_FAILED_ATTEMPTS) showManualFallbackModal();
+</script>
+{% endblock %}

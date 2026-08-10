@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}New Job Posting{% endblock %}
+{% block page_title %}New Job Posting{% endblock %}
+{% block content %}
+<div class="card fade-in">
+  <form method="POST">
+    <div class="form-row">
+      <div class="form-group"><label class="label">Job Title*</label>
+        <select class="form-input" name="position_id" id="position_id" required>
+          <option value="">Select position</option>
+          {% for p in positions %}
+          <option value="{{ p.position_id }}" data-dept="{{ p.department_id }}">{{ p.position_name }}</option>
+          {% endfor %}
+        </select>
+        <p style="font-size:12px;color:#888;margin-top:4px">New titles must first be added to the Position Catalog (Roles &amp; Permissions).</p>
+      </div>
+      <div class="form-group"><label class="label">Department*</label>
+        <select class="form-input" name="department_id" id="department_id" onchange="filterPositions()" required>
+          <option value="">Select department</option>
+          {% for d in departments %}
+          <option value="{{ d.department_id }}">{{ d.department_name }} ({{ d.branch_name }})</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="label">Branch*</label>
+        <select class="form-input" name="branch_id" required>
+          <option value="">Select branch</option>
+          {% for b in branches %}
+          <option value="{{ b.branch_id }}">{{ b.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group"><label class="label">Employment Type*</label>
+        <select class="form-input" name="employment_type" required>
+          <option value="Full-Time">Full-Time</option>
+          <option value="Part-Time">Part-Time</option>
+          <option value="Contract">Contract</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="label">Min Salary</label><input class="form-input" name="min_salary" type="number" step="0.01"></div>
+      <div class="form-group"><label class="label">Max Salary</label><input class="form-input" name="max_salary" type="number" step="0.01"></div>
+    </div>
+    <div class="form-group"><label class="label">Description</label><textarea class="form-input" name="description" rows="4"></textarea></div>
+    <div class="form-group"><label class="label">Requirements</label><textarea class="form-input" name="requirements" rows="4"></textarea></div>
+    <div style="margin-top:16px"><button class="btn btn-primary" type="submit">Create Posting</button> <a href="{{ url_for('recruitment.list_postings') }}" class="btn">Cancel</a></div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function filterPositions() {
+    var deptId = document.getElementById('department_id').value;
+    var sel = document.getElementById('position_id');
+    var options = sel.querySelectorAll('option');
+    options.forEach(function(opt) {
+      if (!opt.value) return;
+      opt.style.display = (!deptId || opt.getAttribute('data-dept') === deptId) ? "" : "none";
+    });
+    if (sel.value && sel.selectedOptions[0].style.display === "none") sel.value = "";
+  }
+</script>
+{% endblock %}

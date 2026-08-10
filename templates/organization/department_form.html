@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Add Department' if not department else 'Edit Department' }} | SmartHR{% endblock %}
+
+{% block page_title %}{{ 'Add Department' if not department else 'Edit Department' }}{% endblock %}
+
+{% block content %}
+<div class="card fade-in">
+  <div class="sec-title">
+    <span>{{ 'Add Department' if not department else 'Edit Department' }}</span>
+    <a href="{{ url_for('organization.departments') }}" class="btn btn-sm">Back to Departments</a>
+  </div>
+
+  <form method="POST" action="
+    {%- if department %}
+      {{ url_for('organization.edit_department', did=department.department_id) }}
+    {%- else %}
+      {{ url_for('organization.add_department') }}
+    {%- endif %}
+  ">
+    <div class="form-row">
+      <div class="form-group"><label class="label">Branch <span style="color:#a32d2d">*</span></label>
+        <select class="form-input" name="branch_id" required>
+          <option value="">Select a branch</option>
+          {% for b in branches %}
+            <option value="{{ b.branch_id }}"
+              {%- if department and department.branch_id == b.branch_id %} selected{% endif %}>
+              {{ b.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group"><label class="label">Department Name <span style="color:#a32d2d">*</span></label>
+        <input class="form-input" type="text" name="department_name"
+               value="{{ department.department_name if department else '' }}"
+               placeholder="e.g. Engineering, Human Resources, Finance"
+               required minlength="2" maxlength="100">
+      </div>
+    </div>
+
+    <div class="form-group"><label class="label">Department Manager</label>
+      <select class="form-input" name="department_manager_id" id="dept-manager-select">
+        <option value="">None (unassigned)</option>
+        {% for m in managers %}
+        <option value="{{ m.employee_id }}" data-branch-id="{{ m.branch_id }}"
+          {%- if department and department.department_manager_id == m.employee_id %} selected{% endif %}>
+          {{ m.full_name }} — {{ m.position_name or 'No position' }} ({{ m.branch_name }})
+        </option>
+        {% endfor %}
+      </select>
+      <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">Assign a department manager who can submit vacancy requests for this department. Only managers from the selected branch are shown.</p>
+    </div>
+
+    <div style="margin-top:16px">
+      <button class="btn btn-primary" type="submit">Save Department</button>
+      <a href="{{ url_for('organization.departments') }}" class="btn">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<script>
+function filterManagers() {
+  var branchSel = document.querySelector('select[name="branch_id"]');
+  var mgrSel = document.getElementById('dept-manager-select');
+  if (!branchSel || !mgrSel) return;
+  var chosen = branchSel.value;
+  mgrSel.querySelectorAll('option[data-branch-id]').forEach(function (opt) {
+    opt.style.display = (chosen && opt.getAttribute('data-branch-id') === chosen) ? '' : 'none';
+  });
+  if (mgrSel.value) {
+    var selOpt = mgrSel.querySelector('option[value="' + mgrSel.value + '"]');
+    if (selOpt && selOpt.getAttribute('data-branch-id') !== chosen) selOpt.style.display = '';
+  }
+}
+document.addEventListener('DOMContentLoaded', function () {
+  var branchSel = document.querySelector('select[name="branch_id"]');
+  if (branchSel) {
+    branchSel.addEventListener('change', filterManagers);
+    filterManagers();
+  }
+});
+</script>
+{% endblock %}

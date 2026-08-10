@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% block title %}Upload IC - SmartHR{% endblock %}
+{% block page_title %}Upload Identity Card (IC){% endblock %}
+
+{% block content %}
+<div style="max-width: 700px; margin: 0 auto;">
+  <div class="card fade-in" style="margin-bottom: 20px; border-left: 4px solid var(--warning-color); background: #fffaf0;">
+    <div style="font-weight: 700; color: #92400e; margin-bottom: 8px;">
+      ⚠️ Please Read Carefully
+    </div>
+    <div style="font-size: 14px; color: #451a03; line-height: 1.6;">
+      <ul style="margin: 0; padding-left: 20px;">
+        <li style="margin-bottom: 6px;">Ensure the IC is <strong>clear and well-lit</strong></li>
+        <li style="margin-bottom: 6px;">Make sure the IC is <strong>in the correct orientation</strong> (not rotated)</li>
+        <li style="margin-bottom: 6px;">Keep the IC <strong>flat on a dark background</strong> for better detection</li>
+        <li>Avoid blurry photos and ensure all text is readable</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card fade-in" style="margin-bottom: 20px;">
+    <div class="sec-title">Step 1: Upload IC Front (Name & IC Number Side)</div>
+    <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px;">
+      <div class="btn btn-primary" onclick="document.getElementById('front_file').click()" id="btn-front">
+        📷 Upload IC Front
+      </div>
+      <div id="front-status" style="flex: 1; font-size: 13px;"></div>
+      <span id="front-check" style="display: none; color: var(--success-color); font-size: 24px;">✓</span>
+    </div>
+    <input type="file" id="front_file" style="display: none" accept="image/*" onchange="uploadFront(this)">
+    <div id="front-preview" style="display: none; margin-bottom: 12px;">
+      <img id="front-img" style="max-width: 300px; max-height: 200px; border-radius: 8px; border: 1px solid #ddd;">
+    </div>
+  </div>
+
+  <div class="card fade-in" style="margin-bottom: 20px;">
+    <div class="sec-title">Step 2: Upload IC Back</div>
+    <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px;">
+      <div class="btn btn-primary" onclick="document.getElementById('back_file').click()" id="btn-back" {% if not front_uploaded %}disabled{% endif %}>
+        📷 Upload IC Back
+      </div>
+      <div id="back-status" style="flex: 1; font-size: 13px;"></div>
+      <span id="back-check" style="display: none; color: var(--success-color); font-size: 24px;">✓</span>
+    </div>
+    <input type="file" id="back_file" style="display: none" accept="image/*" onchange="uploadBack(this)">
+    <div id="back-preview" style="display: none; margin-bottom: 12px;">
+      <img id="back-img" style="max-width: 300px; max-height: 200px; border-radius: 8px; border: 1px solid #ddd;">
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <a class="btn" href="{{ url_for('employees.add_employee') }}">Cancel</a>
+    <button class="btn" id="btn-continue" onclick="continueToAddEmployee()" disabled>
+      Continue to Add Employee
+    </button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let ocrData = {
+  front: null,
+  back: null
+};
+
+function showStatus(elementId, message, type = 'info') {
+  const el = document.getElementById(elementId);
+  let color = 'var(--text-secondary)';
+  if (type === 'success') color = 'var(--success-color)';
+  if (type === 'error') color = 'var(--danger-color)';
+  if (type === 'warning') color = 'var(--warning-color)';
+  el.innerHTML = `<span style="color: ${color}">${message}</span>`;
+}
+
+async function uploadFront(input) {
+  if (!input.files || !input.files[0]) return;
+
+  const status = document.getElementById('front-status');
+  showStatus('front-status', '⏳ Processing...', 'info');
+
+  // Show preview
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    document.getElementById('front-img').src = e.target.result;
+    document.getElementById('front-preview').style.display = 'block';
+  };
+  reader.readAsDataURL(input.files[0]);
+
+  const formData = new FormData();
+  formData.append('id_file', input.files[0]);
+  formData.append('doc_type', 'ic');
+  formData.append('side', 'front');
+
+  try {
+    const response = await fetch("{{ url_for('employees.ocr_identity') }}", {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      showStatus('front-status', '❌ Error processing image. Please try again.', 'error');
+      return;
+    }
+
+    const data = await response.json();
+    input.value = '';
+
+    if (data.error) {
+      showStatus('front-status', `❌ ${data.error}`, 'error');
+      return;
+    }
+
+    ocrData.front = data;
+    document.getElementById('front-check').style.display = 'inline';
+    document.getElementById('btn-front').className = 'btn';
+    document.getElementById('btn-front').innerText = 'Re-upload IC Front';
+    
+    let msg = '✅ IC Front processed successfully!';
+    if (data.ocr_warning) msg += ` ${data.ocr_warning}`;
+    showStatus('front-status', msg, 'success');
+
+    // Enable back upload
+    document.getElementById('btn-back').removeAttribute('disabled');
+
+    // Check if both are done
+    checkCompletion();
+
+  } catch (err) {
+    showStatus('front-status', '❌ Connection error. Please try again.', 'error');
+  }
+}
+
+async function uploadBack(input) {
+  if (!input.files || !input.files[0]) return;
+
+  const status = document.getElementById('back-status');
+  showStatus('back-status', '⏳ Saving...', 'info');
+
+  // Show preview
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    document.getElementById('back-img').src = e.target.result;
+    document.getElementById('back-preview').style.display = 'block';
+  };
+  reader.readAsDataURL(input.files[0]);
+
+  const formData = new FormData();
+  formData.append('id_file', input.files[0]);
+  formData.append('doc_type', 'ic');
+  formData.append('side', 'back');
+
+  try {
+    const response = await fetch("{{ url_for('employees.ocr_identity') }}", {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      showStatus('back-status', '❌ Error saving image. Please try again.', 'error');
+      return;
+    }
+
+    const data = await response.json();
+    input.value = '';
+
+    if (data.error) {
+      showStatus('back-status', `❌ ${data.error}`, 'error');
+      return;
+    }
+
+    ocrData.back = data;
+    document.getElementById('back-check').style.display = 'inline';
+    document.getElementById('btn-back').className = 'btn';
+    document.getElementById('btn-back').innerText = 'Re-upload IC Back';
+    
+    let msg = data.message || '✅ IC Back saved successfully!';
+    showStatus('back-status', msg, 'success');
+
+    // Check if both are done
+    checkCompletion();
+
+  } catch (err) {
+    showStatus('back-status', '❌ Connection error. Please try again.', 'error');
+  }
+}
+
+function checkCompletion() {
+  const btn = document.getElementById('btn-continue');
+  if (ocrData.front && ocrData.back) {
+    btn.disabled = false;
+    btn.className = 'btn btn-primary';
+  }
+}
+
+function continueToAddEmployee() {
+  if (!ocrData.front) return;
+
+  // Store OCR data in sessionStorage for the add employee page
+  const combinedData = {
+    full_name: ocrData.front.full_name || '',
+    ic_number: ocrData.front.ic_number || '',
+    date_of_birth: ocrData.front.date_of_birth || '',
+    gender: ocrData.front.gender || '',
+    address: ocrData.back.address || ocrData.front.address || '',
+    id_document_path: []
+  };
+
+  if (ocrData.front.id_document_path) combinedData.id_document_path.push(ocrData.front.id_document_path);
+  if (ocrData.back.id_document_path) combinedData.id_document_path.push(ocrData.back.id_document_path);
+  combinedData.id_document_path = combinedData.id_document_path.join(',');
+
+  sessionStorage.setItem('icOcrData', JSON.stringify(combinedData));
+  var fromHire = "{{ request.args.get('from_hire', '') }}";
+  var redirectUrl = "{{ url_for('employees.add_employee') }}?from_ic_upload=1";
+  if (fromHire) redirectUrl += "&from_hire=1";
+  window.location.href = redirectUrl;
+}
+</script>
+{% endblock %}

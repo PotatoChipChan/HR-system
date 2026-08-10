@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}Roles & Permissions | SmartHR{% endblock %}
+
+{% block page_title %}Roles & Permissions{% endblock %}
+
+{% block content %}
+
+<div class="card fade-in section-gap">
+  <div class="sec-title">
+    <span>System Roles</span>
+    <span style="font-size:12px;color:var(--text-secondary);font-weight:400">6 fixed roles — permissions are code-enforced</span>
+  </div>
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Role</th>
+        <th>Employees</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in roles %}
+      <tr>
+        <td style="color:var(--text-secondary)">{{ loop.index }}</td>
+        <td>
+          <span class="badge
+            {%- if r.role_name == 'Admin' %} badge-red
+            {%- elif r.role_name == 'HR Director' %} badge-purple
+            {%- elif r.role_name == 'HR Manager' %} badge-green
+            {%- elif r.role_name == 'HR' %} badge-blue
+            {%- elif r.role_name == 'Manager' %} badge-amber
+            {%- else %} badge-gray{% endif %}">{{ r.role_name }}</span>
+        </td>
+        <td><span class="badge badge-blue">{{ r.employee_count or 0 }}</span></td>
+        <td>
+          {% if r.role_name == 'Admin' %}
+            Full system access, user management, organisation settings.
+          {% elif r.role_name == 'HR Director' %}
+            Inherits all Admin privileges — full system access, approvals, organisation settings.
+          {% elif r.role_name == 'HR Manager' %}
+            Inherits Admin &amp; HR permissions — leave/invoice/vacancy approval, interview scheduling.
+          {% elif r.role_name == 'HR' %}
+            Personnel management, leave approvals, payroll, reports.
+          {% elif r.role_name == 'Manager' %}
+            Team oversight, leave approvals (for direct reports), expense claims review, vacancy requests.
+          {% else %}
+            Standard employee — apply leave, view own data, submit claims.
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="4" style="text-align:center;padding:32px;color:var(--text-secondary)">No roles found.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if dept_managers %}
+<div class="card fade-in section-gap">
+  <div class="sec-title">
+    <span>Department Manager Assignments</span>
+    <span style="font-size:12px;color:var(--text-secondary);font-weight:400">Managers assigned via Department Management — they submit vacancy requests for their own department</span>
+  </div>
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>Department</th>
+        <th>Branch</th>
+        <th>Manager</th>
+        <th>Role</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for dm in dept_managers %}
+      <tr>
+        <td style="font-weight:600">{{ dm.department_name }}</td>
+        <td><span class="badge badge-gray">{{ dm.branch_name }}</span></td>
+        <td>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="avatar" style="width:32px;height:32px;font-size:11px">{{ dm.manager_name[:2].upper() }}</div>
+            <div>
+              <div style="font-weight:500">{{ dm.manager_name }}</div>
+              <div style="font-size:11px;color:var(--text-secondary)">{{ dm.position_name or '—' }}</div>
+            </div>
+          </div>
+        </td>
+        <td>
+          <span class="badge {% if dm.role_name == 'HR Manager' %}badge-green{% else %}badge-amber{% endif %}">{{ dm.role_name }}</span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="card fade-in">
+  <div class="sec-title">
+    <span>Position Catalog</span>
+    <span style="font-size:12px;color:var(--text-secondary);font-weight:400">Predefined job titles per department — used by vacancy requests, job postings &amp; employee records</span>
+  </div>
+  <form method="POST" action="{{ url_for('organization.add_position') }}">
+    <div class="form-row">
+      <div class="form-group"><label class="label">New Position Title</label>
+        <input class="form-input" name="position_name" placeholder="e.g. Senior Accountant" required>
+      </div>
+      <div class="form-group"><label class="label">Department</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <select class="form-input" name="department_id" required>
+            <option value="">Select department</option>
+            {% for d in departments %}
+            <option value="{{ d.department_id }}">{{ d.department_name }} ({{ d.branch_name }})</option>
+            {% endfor %}
+          </select>
+          <a href="{{ url_for('organization.add_department') }}" title="Add department"
+             style="white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;gap:6px;color:var(--text-secondary);opacity:.4">
+            <span class="btn btn-sm" style="padding:9px 12px;font-size:14px;border:1px solid var(--border);background:var(--bg-primary);border-radius:12px;cursor:pointer">+</span>
+            <span style="font-size:12px">add department</span>
+          </a>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:4px"><button class="btn btn-primary" type="submit">+ Add Position</button></div>
+  </form>
+
+  {% if positions %}
+  <table class="tbl" style="margin-top:16px">
+    <thead>
+      <tr>
+        <th>Position</th>
+        <th>Department / Branch</th>
+        <th>Employees</th>
+        <th>Postings</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in positions %}
+      <tr{% if not p.is_active %} style="opacity:.55"{% endif %}>
+        <td style="font-weight:600">{{ p.position_name }}</td>
+        <td>{{ p.department_name }} <span class="badge badge-gray">{{ p.branch_name }}</span></td>
+        <td><span class="badge badge-blue">{{ p.emp_count }}</span></td>
+        <td><span class="badge badge-gray">{{ p.posting_count }}</span></td>
+        <td>
+          {% if p.is_active %}<span class="badge badge-green">Active</span>
+          {% else %}<span class="badge badge-gray">Inactive</span>{% endif %}
+        </td>
+        <td style="white-space:nowrap">
+          <form method="POST" action="{{ url_for('organization.rename_position', pid=p.position_id) }}" style="display:inline-flex;gap:4px">
+            <input class="form-input" name="position_name" value="{{ p.position_name }}" style="width:150px;padding:4px 8px" required>
+            <button class="btn btn-sm" type="submit">Rename</button>
+          </form>
+          <form method="POST" action="{{ url_for('organization.toggle_position', pid=p.position_id) }}" style="display:inline">
+            {% if p.is_active %}
+            <button class="btn btn-sm btn-outline-danger" type="submit">Deactivate</button>
+            {% else %}
+            <button class="btn btn-sm btn-success" type="submit">Activate</button>
+            {% endif %}
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state" style="padding:32px 24px">
+    <p style="margin:0">No positions in the catalog yet. Add one above — or run the migration to import existing titles.</p>
+  </div>
+  {% endif %}
+  <p style="font-size:12px;color:var(--text-secondary);margin-top:12px">Deactivating a position hides it from new requests/forms; existing employees and postings keep their link.</p>
+</div>
+
+<div class="alert alert-info" style="margin-top:16px">
+  <span>
+    <strong>Note:</strong> Role permissions are hard-coded in the application logic.
+    To change a user's role, go to <a href="{{ url_for('employees.list_employees') }}">Employee Management</a> and edit their profile.
+    To assign a department manager, go to <a href="{{ url_for('organization.departments') }}">Department Management</a>.
+  </span>
+</div>
+
+{% endblock %}

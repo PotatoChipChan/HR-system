@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}{{ app.applicant_name }}{% endblock %}
+{% block page_title %}Application – {{ app.applicant_name }}{% endblock %}
+{% block content %}
+
+{# ── Status Pipeline ── #}
+{% set steps = ['New','Shortlisted','Interview','Offered','Hired'] %}
+{% set current_idx = steps.index(app.status) if app.status in steps else -1 %}
+<div class="card fade-in" style="margin-bottom:20px;padding:16px 20px">
+  <div style="display:flex;align-items:center;gap:0;width:100%">
+    {% for s in steps %}
+    {% set done = loop.index0 <= current_idx %}
+    {% set active = loop.index0 == current_idx %}
+    <div style="flex:1;display:flex;align-items:center">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1">
+        <div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;
+          {% if active %}background:var(--g600);color:#fff;box-shadow:0 0 0 4px rgba(90,170,60,.2)
+          {% elif done %}background:var(--g400);color:#fff
+          {% else %}background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border){% endif %}">
+          {% if done and not active %}&#10003;{% else %}{{ loop.index }}{% endif %}
+        </div>
+        <span style="font-size:11px;font-weight:{% if active %}700{% else %}500{% endif %};color:{% if active %}var(--g700){% elif done %}var(--text-primary){% else %}var(--text-secondary){% endif %}">{{ s }}</span>
+      </div>
+      {% if not loop.last %}
+      <div style="flex:0 0 24px;height:2px;background:{% if loop.index0 < current_idx %}var(--g400){% else %}var(--border){% endif %};margin-bottom:18px"></div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+{# ── Main Info Card ── #}
+<div class="card fade-in" style="margin-bottom:20px">
+  <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:12px">
+    <div style="flex:1;min-width:200px">
+      <h2 style="margin:0 0 4px">{{ app.applicant_name }}</h2>
+      <p style="margin:0;font-size:13px;color:var(--text-secondary)">
+        <strong>{{ app.job_title }}</strong>
+        &middot; {{ app.department_name }}
+        &middot; {{ app.branch_name }}
+      </p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      {% set source_icon = {'Email':'📧','Portal':'🌐','Manual':'📝'} %}
+      <span class="badge badge-gray" style="font-size:12px">{{ source_icon.get(app.source,'📋') }} {{ app.source }}</span>
+      <span class="badge {% if app.status=='Hired' %}badge-green{% elif app.status=='Rejected' %}badge-red{% elif app.status=='Interview' %}badge-blue{% elif app.status=='Offered' %}badge-blue{% elif app.status=='Shortlisted' %}badge-amber{% endif %}" style="font-size:13px;padding:5px 14px">{{ app.status }}</span>
+    </div>
+  </div>
+  <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:12px;font-size:13px;color:var(--text-secondary)">
+    <span>📧 {{ app.applicant_email }}</span>
+    <span>📞 {{ app.applicant_phone or '—' }}</span>
+    {% if app.applicant_ic %}<span>🪪 {{ app.applicant_ic }}</span>{% endif %}
+    {% if app.applicant_address %}<span>📍 {{ app.applicant_address }}</span>{% endif %}
+    <span>📅 Applied {{ app.applied_at[:10] }}</span>
+    {% if app.ai_score is not none %}
+    <span>🤖 AI Score: <strong>{{ app.ai_score }}</strong></span>
+    {% endif %}
+  </div>
+  {% if app.resume_path %}
+  <div style="margin-top:12px">
+    <a href="{{ url_for('recruitment.download_resume', aid=app.application_id) }}" class="btn btn-sm btn-outline-secondary" target="_blank">📄 Download Resume</a>
+  </div>
+  {% endif %}
+</div>
+
+{# ── Cover Letter / Original Email ── #}
+<div class="card fade-in" style="margin-bottom:20px">
+  <div class="sec-title">
+    {% if app.source == 'Email' %}📧 Original Email{% else %}Cover Letter{% endif %}
+  </div>
+  <p style="white-space:pre-wrap;font-size:13px;color:var(--text-primary);margin:0">{{ app.cover_letter or 'No content.' }}</p>
+</div>
+
+{# ── Admin/HR Actions ── #}
+{% if session['user_role'] in ('Admin','HR','HR Manager') %}
+<div class="card fade-in" style="margin-bottom:20px">
+  <div class="sec-title">Actions</div>
+  <div class="btn-row" style="margin-bottom:0">
+
+    {% if app.status in ('New','Shortlisted','Interview') %}
+    <button class="btn btn-sm btn-primary" onclick="document.getElementById('schedule-form').style.display='block'">🗓️ Schedule Interview</button>
+    {% endif %}
+
+    {% if app.status == 'New' %}
+    <form method="POST" action="{{ url_for('recruitment.update_application_status', aid=app.application_id) }}" style="display:inline">
+      <input type="hidden" name="status" value="Shortlisted">
+      <button class="btn btn-sm btn-success" type="submit">⭐ Shortlist</button>
+    </form>
+    {% endif %}
+
+    {% if app.status not in ('Offered','Hired','Rejected') %}
+    <form method="POST" action="{{ url_for('recruitment.update_application_status', aid=app.application_id) }}" style="display:inline" onclick="return confirm('Dismiss this application? This will reject the candidate and send a notification email.')">
+      <input type="hidden" name="status" value="Rejected">
+      <button class="btn btn-sm btn-outline-danger" type="submit">🗑️ Dismiss</button>
+    </form>
+    {% endif %}
+
+    {% if contract %}
+    <a href="{{ url_for('recruitment.contract', aid=app.application_id) }}" class="btn btn-sm btn-outline-secondary">📄 Edit Contract</a>
+    {% elif has_passed_interview %}
+    <a href="{{ url_for('recruitment.contract', aid=app.application_id) }}" class="btn btn-sm btn-primary">📄 Create Contract & Send Offer</a>
+    {% endif %}
+
+  </div>
+
+  {# ── Schedule Interview Form ── #}
+  {% if app.status in ('New','Shortlisted','Interview') %}
+  <form id="schedule-form" method="POST" action="{{ url_for('recruitment.schedule_interview', aid=app.application_id) }}" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Date *</label><input class="form-input" name="date" type="date" required></div>
+      <div class="form-group"><label class="form-label">Time *</label><input class="form-input" name="time" type="time" required></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Duration (min)</label><input class="form-input" name="duration" type="number" value="60"></div>
+      <div class="form-group"><label class="form-label">Type</label>
+        <select class="form-input" name="type">
+          <option value="In-Person">In-Person</option>
+          <option value="Online">Online</option>
+          <option value="Phone">Phone</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Venue</label><input class="form-input" name="location" placeholder="Room name"></div>
+      <div class="form-group"><label class="form-label">Video Link</label><input class="form-input" name="meeting_link" placeholder="https://"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Interviewer(s)</label>
+      <select class="form-input" name="interviewer_ids" multiple style="min-height:80px">
+        {% for iv in eligible_interviewers %}
+        <option value="{{ iv.employee_id }}">{{ iv.full_name }} ({{ iv.role_name }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn btn-sm btn-primary" type="submit">Schedule & Send Email</button>
+    <button class="btn btn-sm" type="button" onclick="document.getElementById('schedule-form').style.display='none'">Cancel</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ── Interviews Section ── #}
+<div class="card fade-in" style="margin-bottom:20px">
+  <div class="sec-title">Interviews</div>
+  {% if interviews %}
+  <table class="tbl">
+    <thead><tr><th>Date</th><th>Interviewer</th><th>Type</th><th>Status</th><th>Result</th><th>Notes</th><th></th></tr></thead>
+    <tbody>
+      {% for iv in interviews %}
+      <tr>
+        <td>{{ iv.scheduled_at[:16] }}</td>
+        <td>{{ iv.interviewer_names or '—' }}</td>
+        <td>{{ iv.type }}</td>
+        <td><span class="badge {% if iv.status=='Completed' %}badge-green{% elif iv.status=='Cancelled' %}badge-red{% else %}badge-blue{% endif %}">{{ iv.status }}</span></td>
+        <td>{% if iv.result %}<span class="badge {% if iv.result=='Pass' %}badge-green{% else %}badge-red{% endif %}">{{ iv.result }}</span>{% else %}—{% endif %}</td>
+        <td>{{ iv.feedback or '—' }}</td>
+        <td>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+          {% if session['user_role'] in ('Admin','HR','HR Manager') and iv.status in ('Scheduled','Confirmed') and app.status not in ('Rejected','Hired') %}
+          <form method="POST" action="{{ url_for('recruitment.interview_result', iid=iv.interview_id) }}" style="display:flex;gap:4px">
+            <button class="btn btn-sm btn-success" name="result" value="Pass" onclick="return confirm('Mark as Pass? The candidate will advance to the offer stage.')">✅ Pass</button>
+            <button class="btn btn-sm btn-danger" name="result" value="Fail" onclick="return confirm('Mark as Fail? This will reject the candidate.')">❌ Fail</button>
+          </form>
+          <form method="POST" action="{{ url_for('recruitment.cancel_interview', iid=iv.interview_id) }}" style="display:inline">
+            <button class="btn btn-sm btn-outline-secondary" onclick="return confirm('Cancel this interview?')">Cancel</button>
+          </form>
+          {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><div class="icon">🗓️</div><h3>No interviews scheduled</h3></div>
+  {% endif %}
+</div>
+
+{# ── Contract / Offer Section ── #}
+<div class="card fade-in" style="margin-bottom:20px">
+  <div class="sec-title">📄 Contract / Offer</div>
+  {% if contract %}
+  <table class="tbl" style="margin-bottom:12px">
+    <tr><th style="width:140px">Offer Date</th><td>{{ contract.offer_date }}</td></tr>
+    <tr><th>Start Date</th><td>{{ contract.start_date }}</td></tr>
+    <tr><th>Position</th><td>{{ contract.position }}</td></tr>
+    <tr><th>Salary</th><td>RM {{ contract.base_salary }}</td></tr>
+    <tr><th>Type</th><td>{{ contract.employment_type }}</td></tr>
+    <tr><th>Work Hours</th><td>{{ contract.work_start_time }} – {{ contract.work_end_time }}</td></tr>
+    <tr><th>Status</th><td>
+      <span class="badge {% if contract.status=='Accepted' %}badge-green{% elif contract.status=='Sent' %}badge-blue{% elif contract.status=='Signed' %}badge-purple{% elif contract.status=='Declined' %}badge-red{% else %}badge-amber{% endif %}">{{ contract.status }}</span>
+    </td></tr>
+    {% if contract.contract_doc_path %}
+    <tr><th>Unsigned PDF</th><td><a href="{{ url_for('recruitment.download_contract', cid=contract.contract_id, aid=app.application_id) }}">Download</a></td></tr>
+    {% endif %}
+    {% if contract.signed_doc_path %}
+    <tr><th>Signed PDF</th><td><a href="{{ url_for('recruitment.download_signed_contract', cid=contract.contract_id, aid=app.application_id) }}">Download Signed Contract</a></td></tr>
+    {% endif %}
+  </table>
+  {% if session['user_role'] in ('Admin','HR','HR Manager') %}
+  <div class="btn-row" style="margin-bottom:0">
+    {% if contract.status == 'Draft' %}
+    <form method="POST" action="{{ url_for('recruitment.send_offer', aid=app.application_id) }}">
+      <button class="btn btn-sm btn-primary" type="submit">📧 Send Offer to Candidate</button>
+    </form>
+    {% endif %}
+    {% if contract.status == 'Sent' %}
+    <form method="POST" action="{{ url_for('recruitment.accept_offer_hr', aid=app.application_id) }}">
+      <button class="btn btn-sm btn-success" type="submit">✅ Accept Offer (on behalf of candidate)</button>
+    </form>
+    {% endif %}
+    {% if contract.status in ('Signed', 'Accepted') %}
+    <a href="{{ url_for('recruitment.hire', aid=app.application_id) }}" class="btn btn-sm btn-primary">➕ Hire → Add Employee</a>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="empty-state">
+    <div class="icon">📄</div>
+    <h3>No contract yet</h3>
+    <p>Create a contract to send an offer to this candidate.</p>
+    <a href="{{ url_for('recruitment.contract', aid=app.application_id) }}" class="btn btn-primary">📄 Create Contract</a>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+{% block title %}AI Invoice OCR{% endblock %}
+{% block page_title %}My Invoices{% endblock %}
+
+{% block content %}
+<div class="two-col">
+  <!-- Upload -->
+  <div>
+    <div class="card fade-in" style="margin-bottom:20px">
+      <div class="sec-title">Upload Invoice</div>
+      <form method="POST" action="{{ url_for('invoice.upload') }}" enctype="multipart/form-data">
+        <div class="upload-zone" onclick="document.getElementById('inv-file').click()">
+          <div class="upload-icon">📄</div>
+          <div class="upload-title">Drop invoice or click to upload</div>
+          <div class="upload-sub">Supported: JPG, PNG, PDF · Max 10MB</div>
+          <input type="file" id="inv-file" name="invoice_file" accept=".jpg,.jpeg,.png,.pdf"
+                 style="display:none" onchange="this.closest('.upload-zone').querySelector('.upload-sub').textContent=this.files[0].name">
+        </div>
+        <div class="form-row" style="margin-top:16px">
+          <div class="form-group"><label class="form-label">Vendor Name</label><input class="form-input" name="vendor_name" placeholder="e.g. Petronas"></div>
+          <div class="form-group"><label class="form-label">Invoice Number</label><input class="form-input" name="invoice_number" placeholder="e.g. INV-001"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Invoice Date</label><input class="form-input" type="date" name="invoice_date"></div>
+          <div class="form-group"><label class="form-label">Due Date</label><input class="form-input" type="date" name="due_date"></div>
+        </div>
+        <div class="form-row">
+        <div class="form-group">
+            <label class="form-label">Currency</label>
+            <select class="form-input" name="currency" id="currency">
+                <option value="MYR" selected>MYR (Malaysian Ringgit)</option>
+                <option value="USD">USD (US Dollar)</option>
+                <option value="EUR">EUR (Euro)</option>
+                <option value="GBP">GBP (British Pound)</option>
+                <option value="SGD">SGD (Singapore Dollar)</option>
+                <option value="AUD">AUD (Australian Dollar)</option>
+                <option value="JPY">JPY (Japanese Yen)</option>
+                <option value="INR">INR (Indian Rupee)</option>
+                <option value="CAD">CAD (Canadian Dollar)</option>
+                <option value="HKD">HKD (Hong Kong Dollar)</option>
+                <option value="THB">THB (Thai Baht)</option>
+                <option value="IDR">IDR (Indonesian Rupiah)</option>
+                <option value="CHF">CHF (Swiss Franc)</option>
+            </select>
+        </div>
+        <div class="form-group"><label class="form-label">Total Amount *</label><input class="form-input money-input" type="number" step="0.01" min="0" name="total_amount" placeholder="0.00" required></div>
+    </div>
+    <div class="form-row">
+        <div class="form-group"><label class="form-label">Subtotal</label><input class="form-input money-input" type="number" step="0.01" min="0" name="subtotal" placeholder="0.00"></div>
+        <div class="form-group"><label class="form-label">Tax Amount</label><input class="form-input money-input" type="number" step="0.01" min="0" name="tax_amount" placeholder="0.00"></div>
+    </div>
+    <div class="form-row">
+        <div class="form-group">
+            <label class="form-label">Category</label>
+            <select class="form-input" name="category">
+                <option value="">Select category</option>
+                <option>IT Equipment</option><option>Office Supplies</option>
+                <option>Transport</option><option>Training</option>
+                <option>Meals & Entertainment</option><option>Accommodation</option><option>Other</option>
+            </select>
+            <p style="font-size:11px;color:var(--text-secondary);margin-top:4px">Category is auto-detected from invoice details. Please verify its accuracy.</p>
+        </div>
+    </div>
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <textarea class="form-input" name="description" rows="2" placeholder="Brief description of the expense…"></textarea>
+        </div>
+        <input type="hidden" name="ocr_raw_text" id="ocr-raw-text">
+        <input type="hidden" name="ocr_extracted_json" id="ocr-extracted-json">
+        <input type="hidden" name="ocr_confidence" id="ocr-confidence">
+        <div class="ai-panel" style="margin-bottom:12px; display: flex; align-items: center; justify-content: space-between; transition: all 0.3s;" id="ai-panel">
+          <div>
+            <div class="ai-tag">🤖 AI OCR Engine</div>
+            <p style="font-size:12px;margin-top:4px" id="ai-status">Auto-extract data from your invoice image using Tesseract AI.</p>
+          </div>
+          <button type="button" class="btn btn-sm btn-primary" id="btn-ocr" style="flex-shrink:0;">✨ Auto-fill</button>
+        </div>
+        <button class="btn btn-primary" type="submit" style="width:100%" id="btn-submit">Submit Invoice</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- My invoice list -->
+  <div class="card fade-in">
+    <div class="sec-title">
+      My Invoice Submissions
+      <div class="filter-bar" style="margin-bottom:0">
+        <form method="GET" style="display:flex;gap:8px">
+          <select name="status" class="form-input" onchange="this.form.submit()">
+            <option value="" {% if not status_f %}selected{% endif %}>All Status</option>
+            <option value="Pending"  {% if status_f=='Pending'  %}selected{% endif %}>Pending</option>
+            <option value="Approved" {% if status_f=='Approved' %}selected{% endif %}>Approved</option>
+            <option value="Rejected" {% if status_f=='Rejected' %}selected{% endif %}>Rejected</option>
+          </select>
+        </form>
+      </div>
+    </div>
+    {% if invoices %}
+        <table class="tbl">
+          <thead><tr><th>Invoice #</th><th>Vendor</th><th>Amount</th><th>Date</th><th>Status</th></tr></thead>
+          <tbody>
+            {% for i in invoices %}
+            <tr>
+              <td style="font-family:monospace;font-size:12px">{{ i.invoice_number or ('INV-'+('%04d'|format(i.invoice_id))) }}</td>
+              <td>{{ i.vendor_name or '—' }}<div style="font-size:11px;color:var(--text-secondary)">{{ i.category or '' }}</div></td>
+              <td style="font-weight:600">
+                {{ i.currency or 'MYR' }} {{ '%.2f'|format(i.total_amount or 0) }}
+                {% if (i.currency or 'MYR') != 'MYR' and i.total_amount_myr %}
+                <br><span style="font-size:11px;color:var(--text-secondary)">≈ RM {{ '%.2f'|format(i.total_amount_myr) }}</span>
+                {% endif %}
+              </td>
+              <td>{{ i.submitted_at[:10] }}</td>
+              <td>
+                {% if i.status=='Approved' %}<span class="badge badge-green">Approved</span>
+                {% elif i.status=='Rejected' %}<span class="badge badge-red">Rejected</span>
+                {% elif i.status=='Paid' %}<span class="badge badge-blue">Paid</span>
+                {% else %}<span class="badge badge-amber">Pending</span>{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+    {% else %}
+    <div class="empty-state"><div class="icon">🧾</div><p>No invoices found</p></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// OCR Logic
+let lastOCRResult = null;
+
+function formatMoneyInput(value) {
+  const num = parseFloat(value);
+  if (Number.isNaN(num)) return '';
+  return num.toFixed(2);
+}
+
+function limitMoneyDecimals(input) {
+  if (input.value === '' || input.value === null) return;
+  const num = parseFloat(input.value);
+  if (Number.isNaN(num)) return;
+  input.value = Math.max(0, num).toFixed(2);
+}
+
+document.querySelectorAll('.money-input').forEach(function(input) {
+  input.addEventListener('blur', function() { limitMoneyDecimals(input); });
+  input.addEventListener('change', function() { limitMoneyDecimals(input); });
+});
+
+document.getElementById('btn-ocr').addEventListener('click', async function() {
+  const fileInput = document.getElementById('inv-file');
+  if (!fileInput.files.length) {
+    alert('Please select an invoice image first.');
+    return;
+  }
+  
+  const btn = this;
+  const originalText = btn.textContent;
+  const aiPanel = document.getElementById('ai-panel');
+  const aiStatus = document.getElementById('ai-status');
+  
+  btn.textContent = '⌛ Processing...';
+  btn.disabled = true;
+  
+  const formData = new FormData();
+  formData.append('invoice_file', fileInput.files[0]);
+  
+  try {
+    const resp = await fetch('{{ url_for("invoice.ocr_extract") }}', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await resp.json();
+    
+    if (data.error) {
+      alert('OCR Error: ' + data.error);
+    } else {
+      console.log("OCR Diagnostic Data:", data); // LOG TO CONSOLE
+      lastOCRResult = data;
+      document.querySelector('input[name="vendor_name"]').value = data.vendor_name || '';
+      document.querySelector('input[name="invoice_number"]').value = data.invoice_number || '';
+      document.querySelector('input[name="invoice_date"]').value = data.invoice_date || '';
+      document.querySelector('input[name="due_date"]').value = data.due_date || '';
+      document.querySelector('input[name="subtotal"]').value = formatMoneyInput(data.subtotal || 0);
+      document.querySelector('input[name="tax_amount"]').value = formatMoneyInput(data.tax_amount || 0);
+      document.querySelector('input[name="total_amount"]').value = formatMoneyInput(data.total_amount || 0);
+      if (data.category) {
+                document.querySelector('select[name="category"]').value = data.category;
+            }
+      document.querySelector('select[name="currency"]').value = data.currency || 'MYR';
+            document.getElementById('ocr-raw-text').value = data.raw_text || '';
+            document.getElementById('ocr-extracted-json').value = JSON.stringify(data);
+            document.getElementById('ocr-confidence').value = data.confidence || 0;
+
+      // Visual Confidence Feedback
+      const conf = data.confidence || 0;
+      const confPct = Math.round(conf * 100);
+      let statusHtml = `AI Confidence: <b>${confPct}%</b>. Please verify fields.`;
+      
+      if (data.ai_note) {
+          statusHtml += `<br/><span style="color:#854f0b;font-size:11px">⚠️ ${data.ai_note}</span>`;
+      }
+      // Highlight invoice number when OCR used a fallback ID or found nothing
+      const invInput = document.querySelector('input[name="invoice_number"]');
+      if (data.id_needs_review || !data.invoice_number) {
+          invInput.style.backgroundColor = "#fff9db";
+      } else {
+          invInput.style.backgroundColor = "";
+      }
+
+      aiStatus.innerHTML = statusHtml;
+      
+      if (conf < 0.6) {
+        aiPanel.style.borderLeft = "4px solid #a32d2d"; // Low
+        aiStatus.style.color = "#a32d2d";
+      } else if (conf < 0.85) {
+        aiPanel.style.borderLeft = "4px solid #854f0b"; // Medium
+        aiStatus.style.color = "#854f0b";
+      } else {
+        aiPanel.style.borderLeft = "4px solid var(--primary)"; // High
+        aiStatus.style.color = "var(--primary)";
+      }
+      
+      alert('AI Extraction Complete! Please verify the details.');
+    }
+  } catch (err) {
+    alert('Network Error: ' + err.message);
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
+});
+
+// Learning Feedback Loop - Trigger on submit
+document.getElementById('btn-submit').addEventListener('click', async function(e) {
+    if (!lastOCRResult) return;
+    
+    const vendor = document.querySelector('input[name="vendor_name"]').value;
+    const category = document.querySelector('select[name="category"]').value;
+    
+    // Only send if the user actually changed something or if we extracted something
+    if (vendor) {
+        fetch('{{ url_for("invoice.learn_pattern") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                vendor_name: vendor,
+                category: category
+            })
+        });
+    }
+});
+</script>
+{% endblock %}

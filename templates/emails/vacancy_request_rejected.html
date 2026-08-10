@@ -1,0 +1,6 @@
+{% extends "emails/base.html" %}
+{% block content %}
+<p style="margin:0 0 16px;font-size:14px;color:#555;line-height:1.6">Your vacancy request for <strong>{{ position_title }}</strong> has been <strong style="color:#a32d2d">rejected</strong>.</p>
+<p style="margin:0 0 16px;font-size:14px;color:#333;background:#fef0f0;padding:12px 16px;border-radius:6px"><strong>Reason:</strong> {{ rejection_reason }}</p>
+<p style="margin:0;font-size:13px;color:#888">Please review the feedback and you may submit a new request with the necessary adjustments.</p>
+{% endblock %}

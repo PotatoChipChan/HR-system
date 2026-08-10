@@ -1,0 +1,267 @@
+================================================================================
+PLAN - Position Catalog (Predefined Job Titles) for SmartHR
+================================================================================
+Status: IMPLEMENTED and verified - 2026-08-09 (43/43 position-catalog tests + 27/27 Sprint 10 regression tests pass)
+        REVISED - 2026-08-10 (review-driven hardening patch, see section 9)
+Author: AI assistant (with project owner decisions)
+
+--------------------------------------------------------------------------------
+1. GOAL
+--------------------------------------------------------------------------------
+Let HR/Admin manage a per-department position catalog, replace free-text job
+titles with dropdowns on all position inputs, LINK each employee and job
+posting to a catalog entry, and still allow CUSTOM positions in vacancy
+requests (reviewed by HR). The 6 security roles stay as-is (fixed,
+code-enforced).
+
+--------------------------------------------------------------------------------
+2. WHAT THE SYSTEM IS (context for a stranger)
+--------------------------------------------------------------------------------
+SmartHR is a web-based HR system (Flask + SQLite + Bootstrap) for a company
+with multiple branches (KL Headquarters, Penang Office, Johor Bahru Branch).
+Each branch has departments (e.g. Engineering, Finance, Operations) and each
+department has a manager.
+
+Modules: employee records, attendance (face recognition), leaves, salary
+increments, bonuses, invoices/claims, payroll, recruitment (job postings,
+applications, interviews, offers), performance, audit logs, notifications.
+
+Access control: every employee has exactly one ROLE from a fixed set of 6
+(Admin, HR, HR Director, HR Manager, Manager, Employee). Permissions are
+enforced by @role_required decorators hardcoded in the code. Managers are
+scoped to their own branch/department (Sprint 10).
+
+Example user: Hafiz (Penang Engineering dept manager, hafiz@smarthr.my). He
+can request a new position for Penang Engineering.
+
+--------------------------------------------------------------------------------
+3. CURRENT STATE (facts)
+--------------------------------------------------------------------------------
+A. Roles (permission levels) - FIXED, HARD-CODED
+   - Role table contains exactly 6 roles (init_db.py:168).
+   - Permissions are NOT in the DB; they live in @role_required decorators
+     (app/auth/routes.py:22). HR Manager/HR Director inheritance is code.
+   - schema.sql:446+ defines Permission/Role_Permission/Employee_Permission
+     tables but NOTHING uses them at runtime.
+   - Roles & Permissions page (templates/organization/role_list.html) is a
+     read-only list of the 6 roles. No management possible.
+
+B. Positions - CATALOG-DRIVEN (implemented)
+   - Position table: per-department catalog with
+     UNIQUE(department_id, position_name COLLATE NOCASE) and
+     CHECK(TRIM(position_name) = position_name AND length(TRIM(...)) > 0).
+   - Employee.position_id / Job_Posting.position_id / Vacancy_Request.position_id
+     link rows to catalog entries; the display text columns are kept as
+     point-in-time snapshots so reports/emails/contract PDFs work unchanged.
+   - All three position inputs use dropdowns with a custom fallback; custom
+     vacancy-request titles must pass HR review before entering the catalog.
+
+C. What already works (post-implementation)
+   - Vacancy request GET: dept managers see only their managed department;
+     branch managers only their branch (app/recruitment/routes.py:1058-1077).
+   - POST department guard enforced at runtime (routes.py:1056-1072):
+     dept manager dept_id must equal managed_dept_id, otherwise the
+     department's branch_id must equal the session branch. Crafted
+     cross-dept/cross-branch POSTs are rejected and tested.
+   - Position ownership guards on every path submitting both values:
+     position_id must belong to the submitted department_id AND be active
+     (vacancy POST routes.py:1078-1082, add employee employees/routes.py:1944-1954,
+     add posting recruitment/routes.py:56-63).
+   - PRAGMA foreign_keys=ON on every connection (app/database.py:18).
+   - Audit entries for position create/rename/toggle plus custom-position
+     promote-to-catalog and keep-free-text decisions.
+
+--------------------------------------------------------------------------------
+4. PROBLEMS
+--------------------------------------------------------------------------------
+1. Duplicate/misspelled titles ("Software Engineer" vs "Software Enginer")
+   break reports and automated title matching (email monitor matches
+   applications to postings by position name).
+2. No governance: any manager can invent a title.
+3. No central place to list/standardize/deactivate titles.
+4. Roles & Permissions page looks like a management panel but manages nothing
+   and is unaware of job titles.
+5. POST server-side validation gap for department_id.
+
+--------------------------------------------------------------------------------
+5. SOLUTION - 7 STEPS
+--------------------------------------------------------------------------------
+
+STEP 1 - Position table + migration (NO seeded data)
+   New table:
+     Position (
+       position_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+       position_name TEXT NOT NULL,
+       department_id INTEGER NOT NULL REFERENCES Department(department_id),
+       is_active     INTEGER DEFAULT 1,
+       created_at    TEXT DEFAULT (datetime('now')),
+       UNIQUE (department_id, position_name)
+     )
+   Same title in a different department = separate row (dropdown per dept).
+   Data source = existing plaintext:
+     - Collect DISTINCT trimmed titles from Employee.position NEW and
+       Job_Posting.title.
+     - Normalize: trim + collapse inner whitespace; merge case-insensitive
+       duplicates per department (keep first-seen casing as canonical).
+     - Insert each with the department_id of employees/postings holding it.
+- Titles whose department is NULL/unknown are NOT auto-created: they
+        stay unlinked (position_id stays NULL) so HR can review them
+        manually. There is no "Uncategorized" department.
+
+STEP 2 - LINK employees & postings to catalog entries
+   - Add columns:
+       Employee.position_id    INTEGER REFERENCES Position(position_id)
+       Job_Posting.position_id INTEGER REFERENCES Position(position_id)
+     (existing display text columns stay, so reports/emails/contract PDFs
+      keep working unchanged).
+   - Backfill:
+       Employee.position_id  = matching Position (same department +
+                               case-insensitive name); create row if missing.
+       Job_Posting.position_id = same via jp.department_id + title match.
+   - All new form submissions set position_id on save; text is kept for
+     display only.
+
+STEP 3 - Position management UI on the Roles & Permissions page
+   - Extend templates/organization/role_list.html with a "Position Catalog"
+     section: filter by branch/department, add, edit, deactivate (soft),
+     re-activate. Counts per entry (employees / postings linked).
+   - Routes in app/organization/routes.py, guarded by
+     @role_required('Admin', 'HR', 'HR Manager', 'HR Director').
+
+STEP 4 - Dropdowns with custom support in the 3 forms
+   1) Vacancy request (GET query in recruitment/routes.py + template):
+      - Dropdown = active Position rows of the allowed departments
+        (managed dept for dept managers, branch depts for branch managers).
+      - Option "Custom..." shows a text field; custom title stored with
+        is_custom=1, NO catalog row created at submit time.
+      - Vacancy_Request gains: position_id INTEGER, is_custom INTEGER DFLT 0.
+   2) Add employee form (employees/add.html, employees/routes.py):
+      - Position dropdown filtered by selected department, + "Custom..."
+        fallback. (HR context: custom creates catalog row immediately.)
+   3) Add/Edit job posting form (recruitment/add_posting.html):
+      - Title dropdown from Position catalog of posting's department; store
+        catalog title text into Job_Posting.title (unchanged logic).
+
+STEP 5 - Custom position approval flow (HR)
+   - In vacancy request detail (HR view), flag is_custom=1 rows "Custom".
+   - On approve: posting is created from request (as today). HR gets an extra
+     action button "Add 'X' to catalog" (creates Position row for that
+     department and links the posting to it), or "keep as free text".
+   - Rejected requests unchanged.
+
+STEP 6 - Server-side POST guard fix
+   - vacancy_request() POST:
+       * dept manager: f['department_id'] must equal managed_dept_id
+       * branch manager (role Manager): department's branch_id must equal
+         session branch_id
+       * else: flash danger, reject
+   - Apply the same guard to add_posting POST when it accepts a department.
+
+STEP 7 - Skip (decided): no role->permission matrix display.
+
+STEP 8 - Regression & cleanup
+   - Re-run test_sprint10_branch_scoping.py (must stay 27/27).
+   - Add few new tests: Hafiz sees only his dept's positions in the
+     dropdown; POST with another branch's dept_id rejected.
+   - README note about the Position Catalog + custom titles flow.
+
+--------------------------------------------------------------------------------
+6. FILES TO MODIFY
+--------------------------------------------------------------------------------
+| File                                    | Change                         |
+|-----------------------------------------|--------------------------------|
+| schema.sql, init_db.py                  | Position table, migration      |
+| app/organization/routes.py              | Position CRUD + roles page      |
+| templates/organization/role_list.html   | Position Catalog card + add    |
+| app/recruitment/routes.py               | dropdowns, custom flag, POST   |
+|                                        | guard, approve-page catalog    |
+|                                        | action                         |
+| templates/recruitment/vacancy_request.html| dropdown + custom marker    |
+| templates/recruitment/add_posting.html  | dropdown                       |
+| app/employees/routes.py                 | position dropdown + save       |
+| templates/employees/add.html            | position dropdown              |
+| README.md                              | notes                          |
+| test_sprint10_branch_scoping.py        | 1-3 new assertions             |
+
+--------------------------------------------------------------------------------
+7. RISKS / SIDE CASES (pitfalls addressed)
+--------------------------------------------------------------------------------
+- Case-collision: LOWER()=merge rows in same department.
+- Whitepace variants: normalize before insert.
+- Old free-text values never deleted; HR may opportunistically merge them
+  (no auto-delete).
+- Sample data source: Job_Posting.title + Employee.position. Vacancy_Request
+  custom titles stay free text until HR catalogues them.
+- Migration twice-run must be idempotent (INSERT OR IGNORE by unique key,
+  UNIQUE(department_id, position_name)).
+
+--------------------------------------------------------------------------------
+8. DECISIONS MADE (project owner)
+--------------------------------------------------------------------------------
+1. Custom positions ARE allowed (custom flag + HR review). [owner - YES]
+2. Position management UI goes inside the Roles & Permissions page. [YES]
+3. No seeded demo data; migrate real existing titles (Employee.position +
+   Job_Posting.title). [YES]
+4. No permission matrix step. [YES - skip]
+
+--------------------------------------------------------------------------------
+9. REVISION - 2026-08-10 (review-driven hardening patch)
+--------------------------------------------------------------------------------
+Follow-up patch on the shipped implementation (no rewrite). Verification:
+47/47 position-catalog checks + 27/27 Sprint 10 regression tests pass.
+
+A. Security / validation
+   - position_id must belong to the submitted department_id AND be active on
+     every path accepting both: vacancy request POST
+     (app/recruitment/routes.py:1078-1082), add employee
+     (app/employees/routes.py:1944-1954), add job posting
+     (app/recruitment/routes.py:56-63).
+   - Step 6 department_id POST guard confirmed bound at runtime
+     (app/recruitment/routes.py:1056-1072) and covered by crafted-POST tests.
+   - Add Employee form access: HR/Admin only (owner decision - unchanged).
+
+B. Data integrity
+   - UNIQUE(department_id, position_name) -> COLLATE NOCASE; added
+     CHECK(TRIM(position_name) = position_name AND length(TRIM(position_name)) > 0).
+     Existing databases rebuilt in place by init_db._rebuild_position_table():
+     position_id preserved 1:1 (FK links survive), rows normalized, any
+     normalized duplicates merged into the earliest-created survivor.
+   - All creation paths normalize (trim + collapse inner whitespace) before
+     INSERT; the CHECK is a DB-level backstop.
+   - Backfill is now deterministic: UNION ALL + explicit ORDER BY
+     (created_at, source, id) so first-seen casing is stable across runs.
+   - NULL/unknown-department titles stay unlinked (position_id NULL) for HR
+     to review manually - no "Uncategorized" department.
+   - Indexes: composite (department_id, is_active) added; standalone
+     department_id index removed (UNIQUE prefix covers it).
+   - PRAGMA foreign_keys=ON confirmed on every connection
+     (app/database.py:18, init_db.py:17).
+
+C. Business rules
+   - Rename updates the same position_id in place; a different title = a new
+     row (no rewrite of existing links).
+   - Employee.position / Job_Posting.title are point-in-time text snapshots;
+     renames/deactivations never rewrite them.
+   - Audit: create/rename/toggle already logged; promote-to-catalog now logs
+     CREATE_POSITION (target_table=Position, target_record_id=position_id);
+     APPROVE_VACANCY / REJECT_VACANCY action_details now carry is_custom +
+     position_title so custom approval/free-text/reject decisions are traceable.
+
+D. Decisions (owner)
+   - Add Employee form access stays HR/Admin only.
+   - Custom position in Add Employee stays free text (no auto-create),
+     consistent with the vacancy-request HR-review flow.
+
+E. Tests added (12 new checks in test_position_catalog.py)
+   DB-level: raw INSERT of case-collision / padded / inner-whitespace /
+   whitespace-only variants all rejected (NOCASE + CHECK).
+   App-level: add-employee cross-department position rejected with no row
+   created; crafted vacancy POST with inactive position rejected; inactive
+   positions hidden from posting and employee dropdowns; promote-to-catalog
+   audit entry exists; free-text approve carries is_custom+title in audit
+   details; backfill re-run is idempotent; migration schema carries
+   NOCASE + CHECK + composite index (old standalone index gone).
+
+================================================================================
+END OF PLAN
+================================================================================

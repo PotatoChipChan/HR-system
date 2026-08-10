@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Job Postings{% endblock %}
+{% block page_title %}Job Postings{% endblock %}
+{% block content %}
+<div class="card fade-in">
+  <div class="sec-title">
+    <div style="display:flex;gap:4px;align-items:center">
+      <a class="btn btn-sm {{ 'btn-primary' if show=='active' else 'btn-outline-secondary' }}" href="{{ url_for('recruitment.list_postings', show='active') }}">Active</a>
+      <a class="btn btn-sm {{ 'btn-primary' if show=='closed' else 'btn-outline-secondary' }}" href="{{ url_for('recruitment.list_postings', show='closed') }}">Closed</a>
+      {% if session.user_role in ('Admin','HR Manager','HR Director') %}
+      <a href="{{ url_for('recruitment.add_posting') }}" class="btn btn-sm btn-primary" style="margin-left:8px">+ New Posting</a>
+      {% endif %}
+      {% if session.user_role in ('Manager','HR Manager','HR Director') or session.get('is_dept_manager') %}
+      <a href="{{ url_for('recruitment.vacancy_request') }}" class="btn btn-sm btn-outline-secondary" style="margin-left:8px">+ Request Job Posting</a>
+      {% endif %}
+    </div>
+  </div>
+  <form method="GET" style="display:flex;gap:8px;margin-bottom:16px">
+    <input type="hidden" name="show" value="{{ show }}">
+    <input class="form-input" name="q" placeholder="Search title..." value="{{ request.args.get('q','') }}">
+    <select class="form-input" name="dept" style="width:auto">
+      <option value="">All Depts</option>
+      {% for d in departments %}
+      <option value="{{ d.department_id }}" {{ 'selected' if request.args.get('dept')==d.department_id|string }}>{{ d.department_name }}</option>
+      {% endfor %}
+    </select>
+    <select class="form-input" name="branch" style="width:auto">
+      <option value="">All Branches</option>
+      {% for b in branches %}
+      <option value="{{ b.branch_id }}" {{ 'selected' if request.args.get('branch')==b.branch_id|string }}>{{ b.name }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-sm btn-primary" type="submit">Search</button>
+  </form>
+  {% if postings %}
+  <table class="tbl">
+    <thead>
+      <tr><th>Title</th><th>Branch</th><th>Department</th><th>Type</th><th>Salary</th><th>Status</th><th>Apps</th><th>Posted</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for p in postings %}
+      <tr>
+        <td><strong>{{ p.title }}</strong></td>
+        <td>{{ p.branch_name }}</td>
+        <td>{{ p.department_name }}</td>
+        <td>{{ p.employment_type }}</td>
+        <td>{% if p.min_salary %}RM{{ p.min_salary }}{% if p.max_salary %}–{{ p.max_salary }}{% endif %}{% else %}—{% endif %}</td>
+        <td>{% if p.status=='Open' %}<span class="badge badge-green">Open</span>{% elif p.status=='Filled' %}<span class="badge badge-blue">Filled</span>{% else %}<span class="badge">Closed</span>{% endif %}</td>
+        <td>{{ p.app_count }}</td>
+        <td>{{ p.created_at[:10] }}</td>
+        <td><a href="{{ url_for('recruitment.view_posting', pid=p.posting_id) }}" class="btn btn-sm">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><div class="icon">📋</div><h3>No {{ show }} postings</h3></div>
+  {% endif %}
+</div>
+{% endblock %}

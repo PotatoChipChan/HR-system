@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Manual Attendance{% endblock %}
+{% block page_title %}Manual Attendance Entry{% endblock %}
+
+{% block content %}
+<div class="two-col">
+  <div class="card fade-in">
+    <div class="sec-title">Manual {% if is_checked_in %}Check-Out{% else %}Check-In{% endif %}</div>
+    <div class="ai-panel" style="margin-bottom:20px">
+      <div class="ai-tag">⏳ Pending Approval</div>
+      <p style="font-size:12px;margin-top:4px">Submit a manual attendance request. Another Admin/HR must approve it before it takes effect.</p>
+    </div>
+    <form method="POST" action="{{ url_for('attendance.manual') }}">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Date *</label>
+          <input class="form-input" type="date" name="att_date" required
+                 value="{{ now().strftime('%Y-%m-%d') if now else '' }}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Time *</label>
+          <input class="form-input" type="time" name="att_time" required value="09:00">
+        </div>
+      </div>
+      {% set default_type = 'Check Out' if is_checked_in else 'Check In' %}
+      <div class="form-group">
+        <label class="form-label">Entry Type *</label>
+        <select class="form-input" name="att_type" required>
+          <option value="Check In" {% if default_type=='Check In' %}selected{% endif %}>Check In</option>
+          <option value="Check Out" {% if default_type=='Check Out' %}selected{% endif %}>Check Out</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Branch</label>
+        <select class="form-input" name="branch_id">
+          {% for b in branches %}
+          <option value="{{ b.branch_id }}" {% if b.branch_id==session.branch_id %}selected{% endif %}>{{ b.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Override Reason *</label>
+        <select class="form-input" name="reason" required>
+          <option value="Biometric failed (3 attempts)">Biometric failed (3 attempts)</option>
+          <option value="Camera malfunction">Camera malfunction</option>
+          <option value="System offline">System offline</option>
+          <option value="Employee forgot to clock in/out">Employee forgot to clock in/out</option>
+          <option value="HR correction">HR correction</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" type="submit" style="width:100%">Submit Manual {% if is_checked_in %}Check-Out{% else %}Check-In{% endif %}</button>
+    </form>
+  </div>
+
+  <div class="card fade-in">
+    <div class="sec-title">Recent Manual Entries</div>
+    {% if recent %}
+    <table class="tbl">
+      <thead><tr><th>Employee</th><th>Date</th><th>Type</th><th>Hours</th><th>Reason</th></tr></thead>
+      <tbody>
+        {% for a in recent %}
+        <tr>
+          <td>{{ a.full_name }}</td>
+          <td>{{ a.check_in[:10] }}</td>
+          <td>{{ 'Check In' if not a.check_out else 'Both' }}</td>
+          <td>{{ '%.1f'|format(a.hours_worked) if a.hours_worked else '—' }}h</td>
+          <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--text-secondary)">{{ a.manual_reason or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><div class="icon">📝</div><p>No manual entries yet</p></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

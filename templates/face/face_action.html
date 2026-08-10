@@ -1,0 +1,451 @@
+{% extends "base.html" %}
+{% block title %}Face Attendance{% endblock %}
+{% block page_title %}Face Attendance{% endblock %}
+{% block content %}
+<div id="status-banner" class="fade-in" style="margin-bottom:16px;padding:14px 20px;border-radius:10px;font-size:14px;">
+  {% if is_checked_in %}
+  <span id="banner-text">✅ Checked in at {{ last_check_in[11:19] }}. You can <strong>check out</strong> when ready.</span>
+  {% else %}
+  <span id="banner-text">ℹ️ No attendance recorded yet today. Ready to <strong>check in</strong>.</span>
+  {% endif %}
+</div>
+
+{% if manual_mode %}
+<div class="card fade-in" style="margin-bottom:16px; border:2px solid var(--warning);">
+  <div class="sec-title" style="color:var(--warning);">⚠️ Manual {% if is_checked_in %}Check-Out{% else %}Check-In{% endif %}</div>
+  <p style="font-size:13px;margin:8px 0 12px;">
+    Face verification failed {{ failed_attempts }} time(s). You can record your {% if is_checked_in %}check-out{% else %}check-in{% endif %} manually.
+  </p>
+  {% set is_elevated = session.user_role in ['Admin','HR Director','HR Manager','HR','Manager'] %}
+  {% if is_elevated %}
+  <a href="{{ url_for('attendance.manual') }}" class="btn btn-primary">📝 Go to Manual Attendance</a>
+  {% else %}
+  <div id="manual-form">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <input type="time" id="manual-time" class="form-input" style="flex:1;min-width:140px;">
+      <input type="text" id="manual-reason" class="form-input" style="flex:2;min-width:200px;" placeholder="Reason for manual entry" value="Biometric failed (3 attempts)">
+      <button class="btn btn-primary" id="btn-manual-submit" onclick="submitManual()">📝 Submit Manual {% if is_checked_in %}Check-Out{% else %}Check-In{% endif %}</button>
+    </div>
+    <div id="manual-result" style="margin-top:8px;font-size:13px;"></div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="ai-panel fade-in" {% if manual_mode and not is_checked_in %}style="opacity:0.5;pointer-events:none;"{% endif %}>
+  <div class="ai-tag">🔒 Face Verification</div>
+  <p style="margin-top:8px;font-size:13px">
+    Click the button below to activate the camera and verify your face.
+  </p>
+</div>
+
+<div class="two-col">
+  <div>
+    <div class="cam-box" id="cam-container">
+      <div class="cam-placeholder" id="cam-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:14px;text-align:center;padding:20px;">
+        <div>📷 Click the button to start</div>
+      </div>
+      <video id="webcam" autoplay playsinline style="width:100%; height:100%; object-fit:cover; border-radius:18px;display:none;"></video>
+      <div class="face-frame" id="scan-overlay" style="display:none;"><div class="scan-line"></div></div>
+      <canvas id="snapshot" style="display:none;"></canvas>
+      <div id="capture-progress" style="display:none; position:absolute; bottom:16px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.7); color:#fff; padding:10px 20px; border-radius:20px; font-size:13px; font-weight:500; z-index:10;"></div>
+      <div id="quality-indicators" style="display:none; position:absolute; top:12px; right:12px; flex-direction:column; gap:4px; z-index:10;">
+        <div class="q-indicator" id="q-detected" style="display:flex;align-items:center;gap:6px;background:rgba(0,0,0,0.6);padding:4px 10px;border-radius:12px;font-size:11px;color:#fff;">
+          <span class="q-dot" style="width:6px;height:6px;border-radius:50%;background:#666;"></span> Face
+        </div>
+        <div class="q-indicator" id="q-centered" style="display:flex;align-items:center;gap:6px;background:rgba(0,0,0,0.6);padding:4px 10px;border-radius:12px;font-size:11px;color:#fff;">
+          <span class="q-dot" style="width:6px;height:6px;border-radius:50%;background:#666;"></span> Centered
+        </div>
+        <div class="q-indicator" id="q-size" style="display:flex;align-items:center;gap:6px;background:rgba(0,0,0,0.6);padding:4px 10px;border-radius:12px;font-size:11px;color:#fff;">
+          <span class="q-dot" style="width:6px;height:6px;border-radius:50%;background:#666;"></span> Size
+        </div>
+        <div class="q-indicator" id="q-light" style="display:flex;align-items:center;gap:6px;background:rgba(0,0,0,0.6);padding:4px 10px;border-radius:12px;font-size:11px;color:#fff;">
+          <span class="q-dot" style="width:6px;height:6px;border-radius:50%;background:#666;"></span> Lighting
+        </div>
+      </div>
+    </div>
+    <div class="result-area" id="result-area" style="display:none; margin-top:16px;">
+      <div id="result-box" class="alert" style="margin:0;text-align:center;font-size:16px;font-weight:600;"></div>
+    </div>
+    <div class="btn-row" style="margin-top:16px">
+      <button class="btn btn-primary" id="btn-action" style="width:100%;padding:16px;font-size:18px;">
+        Record Attendance
+      </button>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <div class="sec-title">Verification Result</div>
+      <div id="status-panel">
+        <div class="empty-state" id="status-waiting" style="padding:20px;">
+          <div class="icon">📸</div>
+          <p>Click the button to start. Camera will capture multiple frames for verification.</p>
+        </div>
+        <div id="status-result" style="display:none;">
+          <div class="timeline-item">
+            <div class="t-dot" id="result-dot"></div>
+            <div class="t-body">
+              <div class="t-title" id="result-title">Ready</div>
+              <div class="t-sub" id="result-msg">Click the button above to begin.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {% set is_admin = session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+    {% if is_admin %}
+    <div class="card" style="margin-top:16px">
+      <div class="sec-title">Admin Panel</div>
+      <div class="verify-stats">
+        <div class="verify-stat">
+          <span class="verify-stat-label">System Health</span>
+          <span class="verify-stat-val" id="health-indicator">🟢 Healthy</span>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <a href="{{ url_for('attendance.manual') }}" class="btn btn-sm" style="width:100%">📝 Manual Attendance</a>
+      </div>
+      <div id="today-admin" style="margin-top:12px;">
+        <div class="sec-title" style="font-size:13px">Today's Attendance</div>
+        <div id="today-attendance-content" class="text-muted" style="font-size:12px">No records yet.</div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+const video = document.getElementById('webcam');
+const canvas = document.getElementById('snapshot');
+const btnAction = document.getElementById('btn-action');
+const camPlaceholder = document.getElementById('cam-placeholder');
+const scanOverlay = document.getElementById('scan-overlay');
+const statusWaiting = document.getElementById('status-waiting');
+const statusResult = document.getElementById('status-result');
+const resultDot = document.getElementById('result-dot');
+const resultTitle = document.getElementById('result-title');
+const resultMsg = document.getElementById('result-msg');
+const resultArea = document.getElementById('result-area');
+const resultBox = document.getElementById('result-box');
+const captureProgress = document.getElementById('capture-progress');
+const qualityIndicators = document.getElementById('quality-indicators');
+const statusBanner = document.getElementById('status-banner');
+const bannerText = document.getElementById('banner-text');
+
+const MATCH_URL = '{{ url_for("face.api_match_and_record") }}';
+const ANALYZE_URL = '{{ url_for("face.api_analyze_frame") }}';
+const TODAY_URL = '{{ url_for("face.get_today_attendance") }}';
+const HEALTH_URL = '{{ url_for("face.api_health") }}';
+const FAILURE_URL = '{{ url_for("face.api_report_failure") }}';
+const MANUAL_URL = '{{ url_for("face.face_attendance_page", manual=1) }}';
+const MANUAL_SELF_URL = '{{ url_for("attendance.manual_self") }}';
+
+const CAPTURE_DURATION = 3000;
+const DETECTION_INTERVAL = 400;
+const MAX_ATTEMPTS = 3;
+
+let isCheckedIn = {{ 'true' if is_checked_in else 'false' }};
+let lastCheckIn = {{ last_check_in|tojson if last_check_in else 'null' }};
+let recording = false;
+let captureRunning = false;
+let validFrames = [];
+let bestFrame = null;
+
+function getExpectedAction() {
+  return isCheckedIn ? 'check_out' : 'check_in';
+}
+
+function updateBannerAfterAction(action, time) {
+  if (action === 'check_in') {
+    isCheckedIn = true;
+    lastCheckIn = time;
+    statusBanner.className = 'alert alert-success fade-in';
+    bannerText.innerHTML = '✅ Checked in at <strong>' + time + '</strong>. You can <strong>check out</strong> when ready.';
+  } else {
+    isCheckedIn = false;
+    statusBanner.className = 'alert alert-info fade-in';
+    bannerText.innerHTML = '✅ Checked out at <strong>' + time + '</strong>. You can <strong>check in</strong> again tomorrow.';
+  }
+}
+
+function submitManual() {
+  const btn = document.getElementById('btn-manual-submit');
+  const resultEl = document.getElementById('manual-result');
+  const action = isCheckedIn ? 'check_out' : 'check_in';
+  const actionLabel = isCheckedIn ? 'Check-Out' : 'Check-In';
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+  resultEl.textContent = '';
+  const time = document.getElementById('manual-time').value;
+  const reason = document.getElementById('manual-reason').value;
+  if (!reason.trim()) { resultEl.textContent = 'Reason is required.'; btn.disabled = false; btn.textContent = '📝 Submit Manual ' + actionLabel; return; }
+  fetch(MANUAL_SELF_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ time, reason, action })
+  }).then(r => r.json()).then(data => {
+    if (data.error) {
+      resultEl.innerHTML = '<span style="color:var(--danger)">' + data.error + '</span>';
+      btn.disabled = false;
+      btn.textContent = '📝 Submit Manual ' + actionLabel;
+    } else {
+      resultEl.innerHTML = '<span style="color:var(--success)">' + (data.message || 'Manual ' + actionLabel + ' submitted.') + '</span>';
+      btn.textContent = '✅ Submitted';
+      setTimeout(() => { window.location.reload(); }, 2000);
+    }
+  }).catch(err => {
+    resultEl.innerHTML = '<span style="color:var(--danger)">Network error: ' + err.message + '</span>';
+    btn.disabled = false;
+    btn.textContent = '📝 Submit Manual ' + actionLabel;
+  });
+}
+
+// Set default time
+(function() {
+  const mt = document.getElementById('manual-time');
+  if (mt) {
+    const now = new Date();
+    mt.value = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+  }
+})();
+
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
+    video.srcObject = stream;
+    video.style.display = 'block';
+    camPlaceholder.style.display = 'none';
+    scanOverlay.style.display = 'block';
+    return true;
+  } catch (err) {
+    showResult(false, 'Camera error: ' + err.message);
+    return false;
+  }
+}
+
+function stopCamera() {
+  if (video.srcObject) {
+    video.srcObject.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+  }
+  video.style.display = 'none';
+  camPlaceholder.style.display = 'flex';
+  scanOverlay.style.display = 'none';
+  captureProgress.style.display = 'none';
+  qualityIndicators.style.display = 'none';
+}
+
+function captureFrame() {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0);
+  return canvas.toDataURL('image/jpeg', 0.8);
+}
+
+function showResult(success, message) {
+  statusWaiting.style.display = 'none';
+  statusResult.style.display = 'block';
+  resultArea.style.display = 'block';
+  resultDot.style.background = success ? '#5aaa3c' : '#a32d2d';
+  resultTitle.textContent = success ? 'Success' : 'Error';
+  resultMsg.textContent = message;
+  resultBox.className = 'alert alert-' + (success ? 'success' : 'danger');
+  resultBox.textContent = message;
+}
+
+function updateQualityIndicators(result) {
+  const indicators = {
+    'q-detected': result.face_detected,
+    'q-centered': result.centered,
+    'q-size': result.good_size,
+    'q-light': result.good_lighting
+  };
+  Object.entries(indicators).forEach(([id, ok]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const dot = el.querySelector('.q-dot');
+    if (ok) {
+      dot.style.background = '#22c55e';
+      dot.style.boxShadow = '0 0 6px #22c55e';
+    } else {
+      dot.style.background = '#f59e0b';
+      dot.style.boxShadow = '0 0 6px #f59e0b';
+    }
+  });
+}
+
+async function analyzeFrame(imageData) {
+  try {
+    const response = await fetch(ANALYZE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: imageData })
+    });
+    if (!response.ok) return null;
+    const result = await response.json();
+    return result.success ? result : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function runMultiFrameCapture() {
+  const startTime = Date.now();
+  validFrames = [];
+  bestFrame = null;
+  captureRunning = true;
+  captureProgress.style.display = 'block';
+  qualityIndicators.style.display = 'flex';
+
+  while (captureRunning) {
+    const elapsed = Date.now() - startTime;
+    const remaining = Math.ceil((CAPTURE_DURATION - elapsed) / 1000);
+    captureProgress.textContent = remaining > 0 ? `Scanning... ${remaining}s` : 'Analyzing best frame...';
+
+    if (elapsed >= CAPTURE_DURATION) break;
+
+    const imageData = captureFrame();
+    const quality = await analyzeFrame(imageData);
+
+    if (quality && quality.face_detected) {
+      const score = quality.quality_score / 100;
+      validFrames.push({ imageData, score, quality });
+      updateQualityIndicators(quality);
+
+      if (!bestFrame || score > bestFrame.score) {
+        bestFrame = { imageData, score, quality };
+      }
+    }
+
+    const delay = Math.max(0, DETECTION_INTERVAL - (Date.now() - startTime - elapsed));
+    await new Promise(r => setTimeout(r, Math.min(delay, DETECTION_INTERVAL)));
+  }
+
+  captureRunning = false;
+  captureProgress.style.display = 'none';
+  qualityIndicators.style.display = 'none';
+}
+
+let faceAttempts = {{ failed_attempts }};
+
+async function reportCaptureFailure() {
+  try {
+    const r = await fetch(FAILURE_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: getExpectedAction()})
+    });
+    const d = await r.json();
+    faceAttempts = d.failed_attempts;
+    if (d.redirect_url) {
+      showResult(false, 'Too many failed attempts. Redirecting...');
+      btnAction.textContent = 'Redirecting...';
+      setTimeout(() => { window.location.href = d.redirect_url; }, 1500);
+    }
+    return d;
+  } catch(e) {
+    return {failed_attempts: ++faceAttempts};
+  }
+}
+
+btnAction.onclick = async () => {
+  if (recording) return;
+  recording = true;
+  btnAction.disabled = true;
+  btnAction.textContent = 'Starting camera...';
+  resultArea.style.display = 'none';
+
+  const ok = await startCamera();
+  if (!ok) {
+    faceAttempts++;
+    if (faceAttempts >= MAX_ATTEMPTS) { window.location.href = MANUAL_URL; return; }
+    recording = false;
+    btnAction.disabled = false;
+    btnAction.textContent = 'Record Attendance';
+    return;
+  }
+
+  btnAction.textContent = 'Scanning...';
+
+  await new Promise(r => setTimeout(r, 300));
+  await runMultiFrameCapture();
+  stopCamera();
+
+  if (!bestFrame || validFrames.length < 2) {
+    showResult(false, validFrames.length === 0
+      ? 'No face detected. Please ensure your face is clearly visible and well-lit.'
+      : `Only ${validFrames.length} valid frame(s) captured. Please try again with better lighting.`);
+    await reportCaptureFailure();
+    btnAction.textContent = 'Record Attendance';
+    recording = false;
+    btnAction.disabled = false;
+    return;
+  }
+
+  btnAction.textContent = 'Verifying...';
+  const expectedAction = getExpectedAction();
+
+  try {
+    const resp = await fetch(MATCH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: bestFrame.imageData, action: expectedAction })
+    });
+    const data = await resp.json();
+    if (data.redirect_url) {
+      showResult(false, 'Too many failed attempts. Redirecting...');
+      btnAction.textContent = 'Redirecting...';
+      setTimeout(() => { window.location.href = data.redirect_url; }, 1500);
+      return;
+    }
+    if (data.success) {
+      showResult(true, data.msg);
+      const now = new Date().toTimeString().slice(0, 8);
+      updateBannerAfterAction(expectedAction, now);
+      btnAction.textContent = 'Record Attendance';
+    } else {
+      showResult(false, data.msg || 'Verification failed');
+      if (data.failed_attempts) {
+        resultMsg.textContent += ' (' + data.failed_attempts + '/3 attempts)';
+      }
+      btnAction.textContent = 'Record Attendance';
+    }
+  } catch (err) {
+    showResult(false, 'Network error: ' + err.message);
+    btnAction.textContent = 'Record Attendance';
+  } finally {
+    recording = false;
+    btnAction.disabled = false;
+    if (typeof loadToday !== 'undefined') loadToday();
+  }
+};
+
+{% if is_admin %}
+function loadToday() {
+  fetch(TODAY_URL).then(r => r.json()).then(data => {
+    const el = document.getElementById('today-attendance-content');
+    if (!data.success || !data.records.length) { el.textContent = 'No records yet.'; return; }
+    let html = '<table class="tbl" style="font-size:12px"><tr><th>In</th><th>Out</th><th>Hrs</th></tr>';
+    data.records.forEach(r => {
+      html += `<tr><td>${r.check_in}</td><td>${r.check_out}</td><td>${r.hours_worked || '-'}</td></tr>`;
+    });
+    html += '</table>';
+    el.innerHTML = html;
+  }).catch(() => {});
+}
+
+function checkHealth() {
+  fetch(HEALTH_URL).then(r => r.json()).then(data => {
+    const el = document.getElementById('health-indicator');
+    el.textContent = data.status === 'healthy' ? '🟢 Healthy' : '🔴 Unhealthy';
+    el.style.color = data.status === 'healthy' ? '#5aaa3c' : '#a32d2d';
+  }).catch(() => {});
+}
+
+document.addEventListener('DOMContentLoaded', function() { loadToday(); checkHealth(); setInterval(checkHealth, 60000); });
+{% endif %}
+</script>
+{% endblock %}

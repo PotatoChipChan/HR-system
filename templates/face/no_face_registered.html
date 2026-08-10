@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Face Not Registered{% endblock %}
+{% block page_title %}Face Not Registered{% endblock %}
+{% block content %}
+<div class="ai-panel fade-in">
+  <div class="ai-tag">Face Registration Required</div>
+  <p style="margin-top:8px;font-size:13px">Your face has not been registered yet. Contact HR to complete registration before using face check-in or check-out.</p>
+</div>
+
+<div class="card fade-in" style="padding:32px;text-align:center">
+  <div style="font-size:48px;color:var(--text-secondary);margin-bottom:16px">?</div>
+  <div class="sec-title" style="font-size:18px">Hello, {{ employee.full_name }}</div>
+  <p style="color:var(--text-secondary);margin:12px 0 24px">
+    You need to register your face before using face-based attendance.
+  </p>
+
+  <div style="background:var(--bg-secondary);border-radius:12px;padding:20px;text-align:left;margin-bottom:20px">
+    <strong>Next Steps</strong>
+    <ol style="margin:12px 0 0;padding-left:20px;color:var(--text-secondary);font-size:13px">
+      <li>Contact HR or your Manager</li>
+      <li>They will register your face using the Face Registration page</li>
+      <li>Once registered, return here to check in or out</li>
+    </ol>
+  </div>
+
+  <div style="background:var(--bg-secondary);border-radius:12px;padding:20px;text-align:left;margin-bottom:20px">
+    <strong>Why Face Registration?</strong>
+    <ul style="margin:12px 0 0;padding-left:20px;color:var(--text-secondary);font-size:13px">
+      <li>Secure and fast attendance logging</li>
+      <li>No need to remember passwords or codes</li>
+      <li>Reduces time theft and buddy punching</li>
+    </ul>
+  </div>
+
+  <a href="{{ url_for('main.dashboard') }}" class="btn btn-primary">Go to Dashboard</a>
+</div>
+{% endblock %}
