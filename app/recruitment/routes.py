@@ -1,6 +1,7 @@
 """app/recruitment/routes.py – Job Application & Recruitment Module."""
 
 import os
+import secrets
 from flask import (Blueprint, render_template, request, session,
                    flash, redirect, url_for, jsonify, send_from_directory,
                    current_app)
@@ -10,6 +11,97 @@ from app.notifications.email_service import send_email
 from datetime import datetime
 
 recruit_bp = Blueprint('recruitment', __name__, url_prefix='/recruitment')
+
+
+# ── Record-Level Authorization Helpers ────────────────────────────────────────
+# Every helper resolves the record's owner scope and compares it against the
+# session. The dept-manager flag (session.is_dept_manager) is evaluated
+# independently of the role name. Employees never pass these checks.
+
+AUDIENCE_VALUES = ('Internal', 'External', 'Both')
+
+
+def _can_access_application(aid):
+    app = query("SELECT company_id, posting_id FROM Job_Application WHERE application_id=?",
+                (aid,), one=True)
+    if not app:
+        return False
+    role = session.get('user_role')
+    if app['company_id'] is None:
+        return role == 'Admin'
+    if session.get('is_dept_manager') and session.get('managed_dept_id'):
+        if not app['posting_id']:
+            return False
+        jp = query("SELECT department_id FROM Job_Posting WHERE posting_id=?",
+                   (app['posting_id'],), one=True)
+        return bool(jp and jp['department_id'] == session.get('managed_dept_id'))
+    if role == 'Manager':
+        if not app['posting_id']:
+            return False
+        jp = query("SELECT branch_id FROM Job_Posting WHERE posting_id=?",
+                   (app['posting_id'],), one=True)
+        return bool(jp and jp['branch_id'] == session.get('branch_id'))
+    if role in ('Admin', 'HR', 'HR Manager', 'HR Director'):
+        return app['company_id'] == session.get('company_id')
+    return False
+
+
+def _can_access_posting(pid):
+    jp = query("""SELECT jp.department_id, jp.branch_id, b.company_id
+                  FROM Job_Posting jp
+                  JOIN Branch b ON jp.branch_id=b.branch_id
+                  WHERE jp.posting_id=?""", (pid,), one=True)
+    if not jp:
+        return False
+    role = session.get('user_role')
+    if session.get('is_dept_manager') and session.get('managed_dept_id'):
+        return jp['department_id'] == session.get('managed_dept_id')
+    if role == 'Manager':
+        return jp['branch_id'] == session.get('branch_id')
+    if role in ('Admin', 'HR', 'HR Manager', 'HR Director'):
+        return jp['company_id'] == session.get('company_id')
+    return False
+
+
+def _can_access_interview(iid):
+    iv = query("SELECT application_id FROM Interview WHERE interview_id=?", (iid,), one=True)
+    if not iv:
+        return False
+    return _can_access_application(iv['application_id'])
+
+
+def _can_access_contract(cid):
+    c = query("SELECT application_id FROM Contract WHERE contract_id=?", (cid,), one=True)
+    if not c:
+        return False
+    return _can_access_application(c['application_id'])
+
+
+def _can_access_vacancy_request(rid):
+    req = query("""SELECT vr.department_id, d.branch_id, b.company_id
+                   FROM Vacancy_Request vr
+                   JOIN Department d ON vr.department_id=d.department_id
+                   JOIN Branch b ON d.branch_id=b.branch_id
+                   WHERE vr.request_id=?""", (rid,), one=True)
+    if not req:
+        return False
+    role = session.get('user_role')
+    if session.get('is_dept_manager') and session.get('managed_dept_id'):
+        return req['department_id'] == session.get('managed_dept_id')
+    if role == 'Manager':
+        return req['branch_id'] == session.get('branch_id')
+    if role in ('Admin', 'HR', 'HR Manager', 'HR Director'):
+        return req['company_id'] == session.get('company_id')
+    return False
+
+
+def _deny_access():
+    flash('Access denied.', 'danger')
+    return redirect(url_for('main.dashboard'))
+
+
+def _is_valid_audience(value):
+    return value in AUDIENCE_VALUES
 
 
 # ── Public Careers Page ─────────────────────────────────────────────────────
@@ -25,6 +117,7 @@ def careers():
         JOIN Department d ON jp.department_id = d.department_id
         JOIN Branch b ON jp.branch_id = b.branch_id
         WHERE jp.status = 'Open'
+          AND jp.target_audience IN ('External','Both')
         ORDER BY jp.created_at DESC
     """)
     apply_email = 'careers@smarthr.my'
@@ -44,6 +137,7 @@ def careers():
 @recruit_bp.route('/postings/add', methods=['GET', 'POST'])
 @role_required('Admin', 'HR Manager', 'HR Director')
 def add_posting():
+    co = session.get('company_id')
     if request.method == 'POST':
         f = request.form
         emp_type = f['employment_type']
@@ -52,51 +146,84 @@ def add_posting():
                 'fulltime': 'Full-Time', 'parttime': 'Part-Time'}
         emp_type = norm.get(emp_type, emp_type)
 
+        audience = f.get('target_audience', 'Both')
+        if not _is_valid_audience(audience):
+            flash('Invalid audience selection.', 'danger')
+            return redirect(url_for('recruitment.add_posting'))
+
+        try:
+            dept_id = int(f['department_id'])
+            branch_id = int(f['branch_id'])
+        except (TypeError, ValueError):
+            flash('Please select a department and branch.', 'danger')
+            return redirect(url_for('recruitment.add_posting'))
+
+        # Server-side validation: department, branch and position must belong
+        # to the session company and agree with each other (C20).
+        dept = query("""SELECT d.department_id, d.branch_id, b.company_id
+                        FROM Department d JOIN Branch b ON d.branch_id=b.branch_id
+                        WHERE d.department_id=?""", (dept_id,), one=True)
+        if not dept or dept['company_id'] != co:
+            flash('Selected department does not belong to your company.', 'danger')
+            return redirect(url_for('recruitment.add_posting'))
+        if branch_id != dept['branch_id']:
+            flash('Selected branch does not match the department.', 'danger')
+            return redirect(url_for('recruitment.add_posting'))
+
         # Catalog-only selection: new titles must first be added by HR/Admin
         pos = query("SELECT * FROM Position WHERE position_id=? AND is_active=1",
                     (int(f['position_id']),), one=True) if f.get('position_id') else None
         if not pos:
             flash('Please select a position from the catalog (add new titles under Roles & Permissions).', 'danger')
             return redirect(url_for('recruitment.add_posting'))
-        if pos['department_id'] != int(f['department_id']):
+        if pos['department_id'] != dept_id:
             flash('Selected position does not belong to the chosen department.', 'danger')
             return redirect(url_for('recruitment.add_posting'))
 
         pid = execute("""INSERT INTO Job_Posting
             (title, department_id, branch_id, employment_type, position_id,
              min_salary, max_salary, description, requirements,
-             posted_by, status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,'Open')""",
-            (pos['position_name'], int(f['department_id']), int(f['branch_id']),
+             target_audience, posted_by, status)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,'Open')""",
+            (pos['position_name'], dept_id, branch_id,
              emp_type, pos['position_id'],
              float(f['min_salary']) if f.get('min_salary') else None,
              float(f['max_salary']) if f.get('max_salary') else None,
              f.get('description', ''), f.get('requirements', ''),
-             session['user_id']))
+             audience, session['user_id']))
         log_audit('CREATE_POSTING', 'Recruitment',
                   f'Direct posting created: {pos["position_name"]}',
                   action_details={'posting_id': pid, 'title': pos['position_name'],
-                                  'position_id': pos['position_id']})
+                                  'position_id': pos['position_id'],
+                                  'target_audience': audience})
         flash(f'Job posting "{pos["position_name"]}" created!', 'success')
         return redirect(url_for('recruitment.view_posting', pid=pid))
 
     departments = query("""
         SELECT d.*, b.name as branch_name
         FROM Department d JOIN Branch b ON d.branch_id=b.branch_id
-        WHERE EXISTS (SELECT 1 FROM Position p
+        WHERE b.company_id=? AND EXISTS (SELECT 1 FROM Position p
                       WHERE p.department_id=d.department_id AND p.is_active=1)
         ORDER BY d.department_name
-    """)
-    branches = query("SELECT * FROM Branch ORDER BY name")
-    positions = query("SELECT * FROM Position WHERE is_active=1 ORDER BY position_name")
+    """, (co,))
+    branches = query("SELECT * FROM Branch WHERE company_id=? ORDER BY name", (co,))
+    positions = query("""SELECT p.* FROM Position p
+                         JOIN Department d ON p.department_id=d.department_id
+                         JOIN Branch b ON d.branch_id=b.branch_id
+                         WHERE p.is_active=1 AND b.company_id=?
+                         ORDER BY p.position_name""", (co,))
     return render_template('recruitment/add_posting.html',
-                           departments=departments, branches=branches, positions=positions)
+                           departments=departments, branches=branches, positions=positions,
+                           audience_values=AUDIENCE_VALUES)
 
 
 @recruit_bp.route('/postings')
+@login_required
 def list_postings():
     role = session.get('user_role')
     co = session.get('company_id')
+    if role == 'Employee' and not session.get('is_dept_manager'):
+        return _deny_access()
     search = request.args.get('q', '')
     dept = request.args.get('dept', '')
     branch_filter = request.args.get('branch', '')
@@ -107,8 +234,15 @@ def list_postings():
     else:
         conditions = ["jp.status='Open'"]
     args = []
-    if role in ('Admin', 'HR', 'HR Manager', 'HR Director'):
-        pass
+    if session.get('is_dept_manager') and session.get('managed_dept_id'):
+        conditions.append("jp.department_id=?")
+        args.append(session.get('managed_dept_id'))
+    elif role == 'Manager':
+        conditions.append("jp.branch_id=?")
+        args.append(session.get('branch_id'))
+    elif role in ('Admin', 'HR', 'HR Manager', 'HR Director'):
+        conditions.append("b.company_id=?")
+        args.append(co)
 
     sql = """
         SELECT jp.*, d.department_name, b.name as branch_name,
@@ -130,14 +264,19 @@ def list_postings():
 
     sql += " ORDER BY jp.created_at DESC"
     postings = query(sql, args) if args else query(sql)
-    departments = query("SELECT * FROM Department")
-    branches = query("SELECT * FROM Branch ORDER BY name")
+    departments = query("""SELECT d.* FROM Department d
+                           JOIN Branch b ON d.branch_id=b.branch_id
+                           WHERE b.company_id=? ORDER BY d.department_name""", (co,))
+    branches = query("SELECT * FROM Branch WHERE company_id=? ORDER BY name", (co,))
     return render_template('recruitment/list_postings.html',
                            postings=postings, departments=departments, branches=branches, show=show)
 
 
 @recruit_bp.route('/postings/<int:pid>')
+@login_required
 def view_posting(pid):
+    if not _can_access_posting(pid):
+        return _deny_access()
     posting = query("""
         SELECT jp.*, d.department_name, b.name as branch_name, e.full_name as posted_by_name
         FROM Job_Posting jp
@@ -165,7 +304,7 @@ def view_posting(pid):
 @recruit_bp.route('/apply/<int:pid>', methods=['GET', 'POST'])
 def public_apply(pid):
     posting = query("""
-        SELECT jp.*, d.department_name, b.name as branch_name
+        SELECT jp.*, d.department_name, b.name as branch_name, b.company_id
         FROM Job_Posting jp
         JOIN Department d ON jp.department_id=d.department_id
         JOIN Branch b ON jp.branch_id=b.branch_id
@@ -176,6 +315,14 @@ def public_apply(pid):
 
     if posting['status'] != 'Open':
         return '<h2>This job posting is no longer accepting applications.</h2>', 404
+
+    # Logged-in employees are steered to the internal apply flow. Redirect to
+    # the GET detail route (never the POST-only apply endpoint).
+    if session.get('user_id'):
+        return redirect(url_for('recruitment.internal_job_detail', pid=pid))
+
+    if posting['target_audience'] == 'Internal':
+        return '<h2>Job not found.</h2>', 404
 
     if request.method == 'POST':
         f = request.form
@@ -193,9 +340,9 @@ def public_apply(pid):
 
         app_id = execute("""
             INSERT INTO Job_Application
-            (posting_id, applicant_name, applicant_email, applicant_phone, resume_path, cover_letter, source, status)
-            VALUES (?,?,?,?,?,?,'Portal','New')
-        """, (pid, f['applicant_name'], f['applicant_email'], f.get('applicant_phone', ''),
+            (posting_id, company_id, applicant_name, applicant_email, applicant_phone, resume_path, cover_letter, source, status)
+            VALUES (?,?,?,?,?,?,?,'Portal','New')
+        """, (pid, posting['company_id'], f['applicant_name'], f['applicant_email'], f.get('applicant_phone', ''),
               resume_path, f.get('cover_letter', '')))
 
         # AI scoring
@@ -238,7 +385,10 @@ def public_apply(pid):
 @login_required
 def list_applications():
     role = session['user_role']
+    if role == 'Employee' and not session.get('is_dept_manager'):
+        return _deny_access()
     show = request.args.get('show', 'shortlisted')
+    type_filter = request.args.get('type', '')
 
     if show == 'shortlisted':
         status_condition = "ja.status='Shortlisted'"
@@ -266,9 +416,23 @@ def list_applications():
         WHERE {status_condition}
     """
     args = []
-    if role == 'Manager':
-        sql += " AND jp.branch_id=?"
+    co = session.get('company_id')
+    scope = []
+    if session.get('is_dept_manager') and session.get('managed_dept_id'):
+        scope.append("jp.department_id=?")
+        args.append(session.get('managed_dept_id'))
+    elif role == 'Manager':
+        scope.append("jp.branch_id=?")
         args.append(session['branch_id'])
+    else:
+        scope.append("ja.company_id=?")
+        args.append(co)
+        if role == 'Admin':
+            scope.append(f"(ja.company_id IS NULL AND {status_condition})")
+    sql += " AND (" + " OR ".join(scope) + ")"
+    if type_filter in ('Internal', 'External'):
+        sql += " AND ja.applicant_type=?"
+        args.append(type_filter)
     if status_filter:
         sql += " AND ja.status=?"
         args.append(status_filter)
@@ -281,16 +445,21 @@ def list_applications():
     sql += f" ORDER BY {order}"
 
     applications = query(sql, args) if args else query(sql)
-    branches = query("SELECT * FROM Branch ORDER BY name")
-    job_postings = query("SELECT posting_id, title FROM Job_Posting ORDER BY title")
+    branches = query("SELECT * FROM Branch WHERE company_id=? ORDER BY name", (co,))
+    job_postings = query("""SELECT jp.posting_id, jp.title FROM Job_Posting jp
+                            JOIN Branch b ON jp.branch_id=b.branch_id
+                            WHERE b.company_id=? ORDER BY jp.title""", (co,))
     return render_template('recruitment/list_applications.html',
                            applications=applications, status_filter=status_filter,
-                           branches=branches, job_postings=job_postings, show=show)
+                           branches=branches, job_postings=job_postings, show=show,
+                           type_filter=type_filter)
 
 
 @recruit_bp.route('/applications/<int:aid>')
 @login_required
 def view_application(aid):
+    if not _can_access_application(aid):
+        return _deny_access()
     app = query("""
         SELECT ja.*, jp.title as job_title, d.department_name, b.name as branch_name
         FROM Job_Application ja
@@ -372,6 +541,8 @@ def view_application(aid):
 @recruit_bp.route('/applications/<int:aid>/status', methods=['POST'])
 @role_required('Admin', 'HR')
 def update_application_status(aid):
+    if not _can_access_application(aid):
+        return _deny_access()
     new_status = request.form.get('status')
     valid = ['New', 'Shortlisted', 'Interview', 'Offered', 'Hired', 'Rejected']
     if new_status not in valid:
@@ -437,11 +608,36 @@ def update_application_status(aid):
 @recruit_bp.route('/postings/<int:pid>/add-application', methods=['POST'])
 @role_required('Admin', 'HR')
 def add_application(pid):
+    if not _can_access_posting(pid):
+        return _deny_access()
     f = request.form
+    posting = query("""SELECT jp.*, b.company_id FROM Job_Posting jp
+                       JOIN Branch b ON jp.branch_id=b.branch_id
+                       WHERE jp.posting_id=?""", (pid,), one=True)
+    if not posting:
+        flash('Posting not found.', 'danger')
+        return redirect(url_for('recruitment.list_postings'))
+    applicant_type = 'External'
+    internal_employee_id = None
+    if f.get('internal_employee_id'):
+        emp = query("""SELECT e.employee_id FROM Employee e
+                       JOIN Branch b ON e.branch_id=b.branch_id
+                       WHERE e.employee_id=? AND e.is_active=1 AND b.company_id=?""",
+                    (int(f['internal_employee_id']), posting['company_id']), one=True)
+        if not emp:
+            flash('Selected employee is not an active employee of this company.', 'danger')
+            return redirect(url_for('recruitment.view_posting', pid=pid))
+        internal_employee_id = emp['employee_id']
+        applicant_type = 'Internal'
+        f = dict(f)
+        f['applicant_name'] = f.get('applicant_name') or ''
+        f['applicant_email'] = f.get('applicant_email') or ''
     execute("""
-        INSERT INTO Job_Application (posting_id, applicant_name, applicant_email, applicant_phone, cover_letter, status)
-        VALUES (?,?,?,?,?,'New')                                
-    """, (pid, f['applicant_name'], f['applicant_email'], f.get('applicant_phone', ''), f.get('cover_letter', '')))
+        INSERT INTO Job_Application (posting_id, company_id, applicant_name, applicant_email, applicant_phone, cover_letter, applicant_type, internal_employee_id, status)
+        VALUES (?,?,?,?,?,?,?,?,'New')
+    """, (pid, posting['company_id'], f['applicant_name'], f['applicant_email'],
+          f.get('applicant_phone', ''), f.get('cover_letter', ''),
+          applicant_type, internal_employee_id))
     flash(f'Application added for {f["applicant_name"]}.', 'success')
     return redirect(url_for('recruitment.view_posting', pid=pid))
 
@@ -451,6 +647,8 @@ def add_application(pid):
 @recruit_bp.route('/postings/<int:pid>/reject-non-shortlisted', methods=['POST'])
 @role_required('Admin', 'HR', 'HR Manager')
 def reject_non_shortlisted(pid):
+    if not _can_access_posting(pid):
+        return _deny_access()
     posting = query("SELECT title FROM Job_Posting WHERE posting_id=?", (pid,), one=True)
     if not posting:
         flash('Posting not found.', 'danger')
@@ -498,18 +696,29 @@ def reject_non_shortlisted(pid):
 @login_required
 def list_interviews():
     role = session['user_role']
+    if role == 'Employee' and not session.get('is_dept_manager'):
+        return _deny_access()
     status_filter = request.args.get('status', '')
     sql = """
         SELECT i.*, ja.applicant_name, jp.title as job_title
         FROM Interview i
         JOIN Job_Application ja ON i.application_id=ja.application_id
         LEFT JOIN Job_Posting jp ON ja.posting_id=jp.posting_id
+        LEFT JOIN Branch b ON jp.branch_id=b.branch_id
         WHERE 1=1
     """
     args = []
-    if role == 'Manager':
+    if session.get('is_dept_manager') and session.get('managed_dept_id'):
+        sql += " AND jp.department_id=?"
+        args.append(session.get('managed_dept_id'))
+    elif role == 'Manager':
         sql += " AND jp.branch_id=?"
         args.append(session['branch_id'])
+    elif role in ('Admin', 'HR', 'HR Manager', 'HR Director'):
+        sql += " AND b.company_id=?"
+        args.append(session.get('company_id'))
+    else:
+        return _deny_access()
     if status_filter:
         sql += " AND i.status=?"
         args.append(status_filter)
@@ -539,6 +748,8 @@ def list_interviews():
 @recruit_bp.route('/contract/<int:aid>', methods=['GET', 'POST'])
 @role_required('Admin', 'HR')
 def contract(aid):
+    if not _can_access_application(aid):
+        return _deny_access()
     if request.method == 'POST':
         f = request.form
         emp_type = f['employment_type']
@@ -580,6 +791,8 @@ def contract(aid):
 @recruit_bp.route('/application/<int:aid>/schedule-interview', methods=['POST'])
 @role_required('Admin', 'HR')
 def schedule_interview(aid):
+    if not _can_access_application(aid):
+        return _deny_access()
     app_data = query("""
         SELECT ja.*, jp.title as job_title
         FROM Job_Application ja
@@ -629,6 +842,8 @@ def schedule_interview(aid):
 @recruit_bp.route('/interview/<int:iid>/result', methods=['POST'])
 @role_required('Admin', 'HR')
 def interview_result(iid):
+    if not _can_access_interview(iid):
+        return _deny_access()
     interview = query("SELECT * FROM Interview WHERE interview_id=?", (iid,), one=True)
     if not interview:
         flash('Interview not found.', 'danger')
@@ -699,6 +914,8 @@ def interview_result(iid):
 @recruit_bp.route('/interview/<int:iid>/cancel', methods=['POST'])
 @role_required('Admin', 'HR')
 def cancel_interview(iid):
+    if not _can_access_interview(iid):
+        return _deny_access()
     interview = query("SELECT * FROM Interview WHERE interview_id=?", (iid,), one=True)
     if not interview:
         flash('Interview not found.', 'danger')
@@ -715,6 +932,8 @@ def cancel_interview(iid):
 @recruit_bp.route('/application/<int:aid>/send-offer', methods=['POST'])
 @role_required('Admin', 'HR')
 def send_offer(aid):
+    if not _can_access_application(aid):
+        return _deny_access()
     # Ensure company signature_path column exists
     try:
         execute("ALTER TABLE Company ADD COLUMN signature_path TEXT")
@@ -745,6 +964,19 @@ def send_offer(aid):
         print(f"[SEND OFFER] PDF generation failed: {e}")
         pdf_path = None
 
+    # G26: generate a cryptographically random, expiring, single-use token and
+    # persist it. The token is the only authorization for public acceptance.
+    accept_token = secrets.token_urlsafe(32)
+    from datetime import timedelta
+    token_expires_at = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+    token_expires_display = (datetime.now() + timedelta(days=7)).strftime('%d %b %Y')
+    execute("""UPDATE Contract
+               SET accept_token=?, token_expires_at=?
+               WHERE contract_id=?""",
+            (accept_token, token_expires_at, contract['contract_id']))
+    accept_url = url_for('recruitment.accept_offer', cid=contract['contract_id'],
+                         token=accept_token, _external=True)
+
     from flask import current_app
     hr_email = current_app.config.get('MAIL_USERNAME', 'hr@smarthr.my')
     salary_val = contract['base_salary'] or 0
@@ -755,8 +987,8 @@ def send_offer(aid):
         start_date=contract['start_date'],
         salary=f"{salary_val:,.2f}",
         employment_type=contract['employment_type'],
-        contract_id=contract['contract_id'],
-        hr_email=hr_email)
+        accept_url=accept_url,
+        token_expires_display=token_expires_display)
 
     execute("UPDATE Contract SET status='Sent' WHERE contract_id=?", (contract['contract_id'],))
     execute("UPDATE Job_Application SET status='Offered' WHERE application_id=?", (aid,))
@@ -789,6 +1021,8 @@ def send_offer(aid):
 @recruit_bp.route('/resume/<int:aid>/download')
 @login_required
 def download_resume(aid):
+    if not _can_access_application(aid):
+        return _deny_access()
     app = query("SELECT resume_path FROM Job_Application WHERE application_id=?", (aid,), one=True)
     if not app or not app['resume_path']:
         flash('Resume not found.', 'danger')
@@ -811,6 +1045,8 @@ def download_resume(aid):
 @recruit_bp.route('/contract/<int:cid>/download')
 @login_required
 def download_contract(cid):
+    if not _can_access_contract(cid):
+        return _deny_access()
     contract = query("SELECT contract_doc_path, application_id FROM Contract WHERE contract_id=?", (cid,), one=True)
     if not contract or not contract['contract_doc_path']:
         flash('Contract PDF not found.', 'danger')
@@ -832,6 +1068,8 @@ def download_contract(cid):
 @recruit_bp.route('/contract/<int:cid>/download-signed')
 @login_required
 def download_signed_contract(cid):
+    if not _can_access_contract(cid):
+        return _deny_access()
     contract = query("SELECT signed_doc_path, application_id FROM Contract WHERE contract_id=?", (cid,), one=True)
     if not contract or not contract['signed_doc_path']:
         flash('Signed contract PDF not found.', 'danger')
@@ -850,44 +1088,117 @@ def download_signed_contract(cid):
                      mimetype='application/pdf')
 
 
-# ── Accept Offer (Public) ─────────────────────────────────────────────────────
+# ── Accept Offer (Public, token-gated) ────────────────────────────────────────
+# GET shows a confirmation page (read-only). POST performs the acceptance and
+# requires BOTH the session CSRF token (enforced globally) and the valid,
+# unexpired, single-use contract token. Acceptance never marks the application
+# Hired and never closes the posting -- the authorized HR `hire` action does
+# that after verification.
 
-@recruit_bp.route('/contract/<int:cid>/accept')
-def accept_offer(cid):
+def _contract_accept_checks(cid, token):
     contract = query("""
-        SELECT c.*, ja.applicant_name, jp.title as job_title
+        SELECT c.*, ja.applicant_name, ja.applicant_email, jp.title as job_title
         FROM Contract c
         JOIN Job_Application ja ON c.application_id=ja.application_id
         LEFT JOIN Job_Posting jp ON ja.posting_id=jp.posting_id
         WHERE c.contract_id=?
     """, (cid,), one=True)
     if not contract:
-        return '<h2>Offer not found.</h2>', 404
-
+        return None, 'Offer not found.', 404
     if contract['status'] == 'Accepted':
-        return '<h2>This offer has already been accepted.</h2>'
-
+        return None, 'This offer has already been accepted.', 400
     if contract['status'] != 'Sent':
-        return '<h2>This offer is not yet ready to be accepted.</h2>'
+        return None, 'This offer is not yet ready to be accepted.', 400
+    if not token or not contract['accept_token'] or not secrets.compare_digest(
+            contract['accept_token'], token):
+        return None, 'Invalid acceptance link. Please contact HR for a new link.', 400
+    if contract['token_expires_at']:
+        try:
+            expires = datetime.strptime(contract['token_expires_at'], '%Y-%m-%d %H:%M:%S')
+        except (TypeError, ValueError):
+            expires = None
+        if expires and datetime.now() > expires:
+            return None, 'This acceptance link has expired. Please contact HR for a new link.', 400
+    return contract, None, None
 
-    execute("UPDATE Contract SET status='Accepted' WHERE contract_id=?", (cid,))
-    execute("UPDATE Job_Application SET status='Hired' WHERE application_id=?", (contract['application_id'],))
-    # Close the job posting
-    close_job_posting_for_application(contract['application_id'])
-    log_audit('ACCEPT_OFFER', 'Recruitment', f'Offer {cid} accepted by candidate')
 
-    # Notify all Admin/HR users
+@recruit_bp.route('/contract/<int:cid>/accept', methods=['GET', 'POST'])
+def accept_offer(cid):
+    token = request.args.get('token') or request.form.get('token')
+    contract, error, status = _contract_accept_checks(cid, token)
+    if error:
+        return f'<h2>{error}</h2>', status
+
+    if request.method == 'GET':
+        return render_template('recruitment/accept_confirm.html',
+                               contract=contract,
+                               token=token,
+                               expires_display=(datetime.strptime(
+                                   contract['token_expires_at'], '%Y-%m-%d %H:%M:%S')
+                                   .strftime('%d %b %Y') if contract['token_expires_at'] else None))
+
+    # POST: token re-validated above; CSRF enforced by the global check.
+    if request.form.get('action') == 'decline':
+        execute("""UPDATE Contract SET status='Declined', accept_token=NULL
+                   WHERE contract_id=?""", (cid,))
+        log_audit('DECLINE_OFFER', 'Recruitment',
+                  f'Offer {cid} declined by candidate via secure link')
+        try:
+            from app.notifications.routes import send_in_app_to_company
+            company_row = query("""SELECT company_id FROM Job_Application
+                                   WHERE application_id=?""",
+                                (contract['application_id'],), one=True)
+            if company_row and company_row['company_id']:
+                send_in_app_to_company(
+                    company_row['company_id'],
+                    ('Admin', 'HR', 'HR Manager', 'HR Director'),
+                    'Offer Declined',
+                    f'{contract["applicant_name"]} declined the offer for {contract["job_title"]}.',
+                    type='Warning',
+                    related_url='/recruitment/applications')
+        except Exception as e:
+            print(f"[ACCEPT OFFER] Decline notification failed: {e}")
+        return render_template('recruitment/offer_accepted.html',
+                               applicant_name=contract['applicant_name'],
+                               job_title=contract['job_title'],
+                               application_id=contract['application_id'],
+                               declined=True)
+
+    signed_doc_path = None
+    signed_file = request.files.get('signed_doc')
+    if signed_file and signed_file.filename:
+        import uuid
+        ext = os.path.splitext(signed_file.filename)[1] or '.pdf'
+        filename = f"signed_{uuid.uuid4().hex}{ext}"
+        signed_dir = os.path.join(current_app.root_path, '..', 'uploads', 'signed_contracts')
+        os.makedirs(signed_dir, exist_ok=True)
+        signed_file.save(os.path.join(signed_dir, filename))
+        signed_doc_path = filename
+
+    execute("""UPDATE Contract
+               SET status='Accepted', accepted_at=datetime('now'), accept_token=NULL,
+                   signed_doc_path=COALESCE(?, signed_doc_path),
+                   signed_at=COALESCE(?, signed_at)
+               WHERE contract_id=?""",
+            (signed_doc_path, datetime.now().strftime('%Y-%m-%d %H:%M:%S') if signed_doc_path else None,
+             cid))
+    log_audit('ACCEPT_OFFER', 'Recruitment',
+              f'Offer {cid} accepted by candidate via secure link'
+              + (' with signed document attached' if signed_doc_path else ''))
+
     try:
-        from app.notifications.routes import send_notification
-        hr_users = query("SELECT employee_id FROM Employee WHERE role_id IN (SELECT role_id FROM Role WHERE role_name IN ('Admin','HR','HR Manager','HR Director')) AND is_active=1")
-        for u in hr_users:
-            send_notification(
-                u['employee_id'],
+        from app.notifications.routes import send_in_app_to_company
+        company_row = query("""SELECT company_id FROM Job_Application
+                               WHERE application_id=?""",
+                            (contract['application_id'],), one=True)
+        if company_row and company_row['company_id']:
+            send_in_app_to_company(
+                company_row['company_id'],
+                ('Admin', 'HR', 'HR Manager', 'HR Director'),
                 'Offer Accepted',
-                f'{contract["applicant_name"]} accepted the offer for {contract["job_title"]}',
+                f'{contract["applicant_name"]} accepted the offer for {contract["job_title"]}.',
                 type='Offer',
-                related_url='/recruitment/applications'
-            )
+                related_url='/recruitment/applications')
     except Exception as e:
         print(f"[ACCEPT OFFER] Notification failed: {e}")
 
@@ -902,6 +1213,8 @@ def accept_offer(cid):
 @recruit_bp.route('/application/<int:aid>/accept-offer', methods=['POST'])
 @role_required('Admin', 'HR')
 def accept_offer_hr(aid):
+    if not _can_access_application(aid):
+        return _deny_access()
     contract = query("SELECT * FROM Contract WHERE application_id=?", (aid,), one=True)
     if not contract:
         flash('No contract found.', 'danger')
@@ -913,17 +1226,19 @@ def accept_offer_hr(aid):
     close_job_posting_for_application(aid)
     log_audit('ACCEPT_OFFER_HR', 'Recruitment', f'Offer accepted by HR for application {aid}')
     try:
-        from app.notifications.routes import send_notification
-        hr_users = query("SELECT employee_id FROM Employee WHERE role_id IN (SELECT role_id FROM Role WHERE role_name IN ('Admin','HR','HR Manager','HR Director')) AND is_active=1")
-        app_data = query("SELECT ja.applicant_name, jp.title as job_title FROM Job_Application ja LEFT JOIN Job_Posting jp ON ja.posting_id=jp.posting_id WHERE ja.application_id=?", (aid,), one=True)
-        for u in hr_users:
-            send_notification(
-                u['employee_id'],
+        from app.notifications.routes import send_in_app_to_company
+        app_data = query("""SELECT ja.applicant_name, ja.company_id, jp.title as job_title
+                            FROM Job_Application ja
+                            LEFT JOIN Job_Posting jp ON ja.posting_id=jp.posting_id
+                            WHERE ja.application_id=?""", (aid,), one=True)
+        if app_data and app_data['company_id']:
+            send_in_app_to_company(
+                app_data['company_id'],
+                ('Admin', 'HR', 'HR Manager', 'HR Director'),
                 'Offer Accepted (HR)',
                 f'Offer accepted by HR for {app_data["applicant_name"]} – {app_data["job_title"]}',
                 type='Offer',
-                related_url='/recruitment/applications'
-            )
+                related_url='/recruitment/applications')
     except Exception as e:
         print(f"[ACCEPT OFFER HR] Notification failed: {e}")
     flash('Offer accepted. You can now proceed to add the employee.', 'success')
@@ -935,6 +1250,8 @@ def accept_offer_hr(aid):
 @recruit_bp.route('/application/<int:aid>/verify-signed-contract', methods=['POST'])
 @role_required('Admin', 'HR')
 def verify_signed_contract(aid):
+    if not _can_access_application(aid):
+        return _deny_access()
     contract = query("SELECT * FROM Contract WHERE application_id=?", (aid,), one=True)
     if not contract:
         flash('No contract found.', 'danger')
@@ -954,17 +1271,19 @@ def verify_signed_contract(aid):
               f'Signed contract {contract["contract_id"]} verified and accepted for application {aid}')
 
     try:
-        from app.notifications.routes import send_notification
-        hr_users = query("SELECT employee_id FROM Employee WHERE role_id IN (SELECT role_id FROM Role WHERE role_name IN ('Admin','HR','HR Manager','HR Director')) AND is_active=1")
-        app_data = query("SELECT ja.applicant_name, jp.title as job_title FROM Job_Application ja LEFT JOIN Job_Posting jp ON ja.posting_id=jp.posting_id WHERE ja.application_id=?", (aid,), one=True)
-        for u in hr_users:
-            send_notification(
-                u['employee_id'],
+        from app.notifications.routes import send_in_app_to_company
+        app_data = query("""SELECT ja.applicant_name, ja.company_id, jp.title as job_title
+                            FROM Job_Application ja
+                            LEFT JOIN Job_Posting jp ON ja.posting_id=jp.posting_id
+                            WHERE ja.application_id=?""", (aid,), one=True)
+        if app_data and app_data['company_id']:
+            send_in_app_to_company(
+                app_data['company_id'],
+                ('Admin', 'HR', 'HR Manager', 'HR Director'),
                 'Signed Contract Verified',
                 f'Signed contract verified for {app_data["applicant_name"]} – {app_data["job_title"]}',
                 type='Offer',
-                related_url='/recruitment/applications'
-            )
+                related_url='/recruitment/applications')
     except Exception as e:
         print(f"[VERIFY SIGNED CONTRACT] Notification failed: {e}")
 
@@ -985,6 +1304,8 @@ def verify_signed_contract(aid):
 @recruit_bp.route('/application/<int:aid>/hire')
 @role_required('Admin', 'HR')
 def hire(aid):
+    if not _can_access_application(aid):
+        return _deny_access()
     app_data = dict(query("""
         SELECT ja.*, jp.branch_id, jp.department_id as posting_dept_id, jp.title as job_title
         FROM Job_Application ja
@@ -1055,21 +1376,32 @@ def vacancy_request():
                 'fulltime': 'Full-Time', 'parttime': 'Part-Time'}
         emp_type = norm.get(emp_type, emp_type)
 
+        audience = f.get('target_audience', 'Both')
+        if not _is_valid_audience(audience):
+            flash('Invalid audience selection.', 'danger')
+            return redirect(url_for('recruitment.vacancy_request'))
+
         # ── Server-side guard: never trust the dropdown for authorization ──
         try:
             dept_id = int(f['department_id'])
         except (TypeError, ValueError):
             flash('Please select a department.', 'danger')
             return redirect(url_for('recruitment.vacancy_request'))
+        co = session.get('company_id')
+        dept_row = query("""SELECT d.department_id, d.branch_id, b.company_id
+                            FROM Department d JOIN Branch b ON d.branch_id=b.branch_id
+                            WHERE d.department_id=?""", (dept_id,), one=True)
         if role in ('Admin', 'HR', 'HR Manager', 'HR Director'):
-            pass
+            # HR roles may pick any department OF THEIR OWN COMPANY only (C20)
+            if not dept_row or dept_row['company_id'] != co:
+                flash('Selected department does not belong to your company.', 'danger')
+                return redirect(url_for('recruitment.vacancy_request'))
         elif is_dept_mgr and managed_dept_id:
             if dept_id != managed_dept_id:
                 flash('You may only request positions for your own department.', 'danger')
                 return redirect(url_for('recruitment.vacancy_request'))
         else:
-            dept = query("SELECT branch_id FROM Department WHERE department_id=?", (dept_id,), one=True)
-            if not dept or dept['branch_id'] != session.get('branch_id'):
+            if not dept_row or dept_row['branch_id'] != session.get('branch_id'):
                 flash('You may only request positions for your own branch.', 'danger')
                 return redirect(url_for('recruitment.vacancy_request'))
 
@@ -1092,18 +1424,38 @@ def vacancy_request():
             is_custom = 1
             position_id = None
 
-        execute("""INSERT INTO Vacancy_Request
+        request_id = execute("""INSERT INTO Vacancy_Request
                    (requested_by, department_id, position_title, position_id, is_custom,
-                    employment_type, min_salary, max_salary, description, requirements, reason, status)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,'Pending')""",
+                    employment_type, min_salary, max_salary, description, requirements, reason,
+                    target_audience, status)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'Pending')""",
                 (session['user_id'], dept_id, position_title, position_id, is_custom,
                  emp_type,
                  float(f['min_salary']) if f.get('min_salary') else None,
                  float(f['max_salary']) if f.get('max_salary') else None,
                  f.get('description', ''), f.get('requirements', ''),
-                 f.get('reason', '')))
+                 f.get('reason', ''), audience))
         log_audit('SUBMIT_VACANCY', 'Recruitment', f'Vacancy request submitted: {position_title}',
-                  action_details={'department_id': dept_id, 'is_custom': is_custom})
+                  action_details={'department_id': dept_id, 'is_custom': is_custom,
+                                  'target_audience': audience, 'request_id': request_id})
+
+        # Notify eligible reviewers in-app: same company only, requester
+        # excluded, per-recipient failure isolation (P12).
+        try:
+            from app.notifications.routes import send_in_app_to_company
+            dept_name = query("SELECT department_name FROM Department WHERE department_id=?",
+                              (dept_id,), one=True)['department_name']
+            send_in_app_to_company(
+                co,
+                ('Admin', 'HR', 'HR Manager', 'HR Director'),
+                'New Job Posting Request',
+                f"{session.get('user_name', 'An employee')} requested a {position_title} job posting for {dept_name}.",
+                type='Info',
+                related_url=url_for('recruitment.view_vacancy_request', rid=request_id),
+                exclude_employee_id=session.get('user_id'))
+        except Exception as e:
+            print(f"[VACANCY NOTIFY] Failed: {e}")
+
         flash('Vacancy request submitted for review.', 'success')
         return redirect(url_for('recruitment.list_vacancy_requests'))
 
@@ -1120,8 +1472,9 @@ def vacancy_request():
         departments = query("""
             SELECT d.*, b.name as branch_name
             FROM Department d JOIN Branch b ON d.branch_id=b.branch_id
+            WHERE b.company_id=?
             ORDER BY d.department_name
-        """)
+        """, (session.get('company_id'),))
     else:
         departments = query("""
             SELECT d.*, b.name as branch_name
@@ -1141,7 +1494,8 @@ def vacancy_request():
     else:
         positions = []
     return render_template('recruitment/vacancy_request.html',
-                           departments=departments, positions=positions)
+                           departments=departments, positions=positions,
+                           audience_values=AUDIENCE_VALUES)
 
 
 @recruit_bp.route('/vacancy-requests')
@@ -1157,9 +1511,11 @@ def list_vacancy_requests():
             SELECT vr.*, d.department_name, e.full_name as requester_name
             FROM Vacancy_Request vr
             JOIN Department d ON vr.department_id=d.department_id
+            JOIN Branch b ON d.branch_id=b.branch_id
             JOIN Employee e ON vr.requested_by=e.employee_id
+            WHERE b.company_id=?
             ORDER BY vr.created_at DESC
-        """)
+        """, (session.get('company_id'),))
     # Dept manager: see all requests for their managed department
     elif is_dept_mgr and managed_dept_id:
         requests = query("""
@@ -1198,14 +1554,9 @@ def view_vacancy_request(rid):
         flash('Vacancy request not found.', 'danger')
         return redirect(url_for('recruitment.list_vacancy_requests'))
 
-    role = session['user_role']
-    user_id = session['user_id']
-    managed_dept_id = session.get('managed_dept_id')
-    if role not in ('Admin', 'HR', 'HR Manager', 'HR Director') and req['requested_by'] != user_id:
-        # Also allow department managers to view requests for their department
-        if not (session.get('is_dept_manager') and managed_dept_id == req['department_id']):
-            flash('Access denied.', 'danger')
-            return redirect(url_for('recruitment.list_vacancy_requests'))
+    if req['requested_by'] != session['user_id'] and not _can_access_vacancy_request(rid):
+        flash('Access denied.', 'danger')
+        return redirect(url_for('recruitment.list_vacancy_requests'))
 
     return render_template('recruitment/vacancy_request_detail.html', req=req)
 
@@ -1213,6 +1564,8 @@ def view_vacancy_request(rid):
 @recruit_bp.route('/vacancy-request/<int:rid>/approve', methods=['POST'])
 @role_required('Admin', 'HR', 'HR Manager')
 def approve_vacancy(rid):
+    if not _can_access_vacancy_request(rid):
+        return _deny_access()
     uid = session['user_id']
     req = query("SELECT * FROM Vacancy_Request WHERE request_id=?", (rid,), one=True)
     if not req:
@@ -1226,6 +1579,21 @@ def approve_vacancy(rid):
     if not branch_id:
         flash('Please select a branch for this position.', 'danger')
         return redirect(url_for('recruitment.view_vacancy_request', rid=rid))
+    try:
+        branch_id = int(branch_id)
+    except (TypeError, ValueError):
+        flash('Invalid branch selection.', 'danger')
+        return redirect(url_for('recruitment.view_vacancy_request', rid=rid))
+
+    # C20: the branch must be the branch of the request's department (which
+    # already constrains it to the session company via _can_access_vacancy_request).
+    dept_row = query("SELECT branch_id FROM Department WHERE department_id=?",
+                     (req['department_id'],), one=True)
+    if not dept_row or dept_row['branch_id'] != branch_id:
+        flash('Selected branch does not match the request department.', 'danger')
+        return redirect(url_for('recruitment.view_vacancy_request', rid=rid))
+
+    audience = req['target_audience']
 
     # Custom positions: HR decides whether to promote the title into the catalog
     posting_position_id = req['position_id']
@@ -1253,12 +1621,13 @@ def approve_vacancy(rid):
     posting_id = execute("""INSERT INTO Job_Posting
         (title, department_id, branch_id, employment_type, position_id,
          min_salary, max_salary, description, requirements,
-         posted_by, status)
-        VALUES (?,?,?,?,?,?,?,?,?,?,'Open')""",
-        (req['position_title'], req['department_id'], int(branch_id),
+         target_audience, posted_by, status)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,'Open')""",
+        (req['position_title'], req['department_id'], branch_id,
          req['employment_type'], posting_position_id,
          req['min_salary'], req['max_salary'],
-         req['description'], req['requirements'], uid))
+         req['description'], req['requirements'],
+         audience, uid))
 
     execute("""UPDATE Vacancy_Request
                SET status='Approved', reviewed_by=?, reviewed_at=datetime('now'), posting_id=?
@@ -1287,6 +1656,8 @@ def approve_vacancy(rid):
 @recruit_bp.route('/vacancy-request/<int:rid>/reject', methods=['POST'])
 @role_required('Admin', 'HR', 'HR Manager')
 def reject_vacancy(rid):
+    if not _can_access_vacancy_request(rid):
+        return _deny_access()
     uid = session['user_id']
     req = query("SELECT * FROM Vacancy_Request WHERE request_id=?", (rid,), one=True)
     if not req:
@@ -1342,11 +1713,29 @@ def reject_vacancy(rid):
 @recruit_bp.route('/_branches-for-dept/<int:dept_id>')
 @login_required
 def _branches_for_dept(dept_id):
-    dept = query("SELECT branch_id FROM Department WHERE department_id=?", (dept_id,), one=True)
-    if not dept:
+    dept = query("""SELECT d.branch_id, b.company_id
+                    FROM Department d JOIN Branch b ON d.branch_id=b.branch_id
+                    WHERE d.department_id=?""", (dept_id,), one=True)
+    if not dept or dept['company_id'] != session.get('company_id'):
         return jsonify([])
     branches = query("SELECT branch_id, name FROM Branch WHERE branch_id=?", (dept['branch_id'],))
     return jsonify([dict(b) for b in branches])
+
+
+@recruit_bp.route('/_positions-for-dept/<int:dept_id>')
+@login_required
+def _positions_for_dept(dept_id):
+    dept = query("""SELECT d.department_id, b.company_id
+                    FROM Department d JOIN Branch b ON d.branch_id=b.branch_id
+                    WHERE d.department_id=?""", (dept_id,), one=True)
+    if not dept or dept['company_id'] != session.get('company_id'):
+        return jsonify([])
+    positions = query("""
+        SELECT position_id, position_name FROM Position
+        WHERE department_id=? AND is_active=1
+        ORDER BY position_name
+    """, (dept_id,))
+    return jsonify([dict(p) for p in positions])
 
 
 # ── Bulk Interview Scheduling ─────────────────────────────────────────────────
@@ -1357,6 +1746,8 @@ def bulk_schedule():
     if request.method == 'POST':
         f = request.form
         posting_id = int(f['posting_id'])
+        if not _can_access_posting(posting_id):
+            return _deny_access()
         date = f['date']
         start_time = f['start_time']
         duration = int(f.get('duration', 30))
@@ -1421,10 +1812,11 @@ def bulk_schedule():
         SELECT jp.posting_id, jp.title,
                (SELECT COUNT(*) FROM Job_Application WHERE posting_id=jp.posting_id AND status='Shortlisted') as candidate_count
         FROM Job_Posting jp
-        WHERE jp.status='Open'
+        JOIN Branch b ON jp.branch_id=b.branch_id
+        WHERE jp.status='Open' AND b.company_id=?
           AND (SELECT COUNT(*) FROM Job_Application WHERE posting_id=jp.posting_id AND status='Shortlisted') > 0
         ORDER BY jp.title
-    """)
+    """, (session.get('company_id'),))
     co = session.get('company_id')
     branch_id = session.get('branch_id', 0)
     interviewers = query("""
@@ -1441,6 +1833,8 @@ def bulk_schedule():
 @recruit_bp.route('/_shortlisted-for-posting/<int:pid>')
 @login_required
 def _shortlisted_for_posting(pid):
+    if not _can_access_posting(pid):
+        return jsonify({'error': 'Forbidden'}), 403
     candidates = query("""
         SELECT application_id, applicant_name, applicant_email
         FROM Job_Application
@@ -1575,9 +1969,17 @@ def auto_assign_preview():
     branch_id = session.get('branch_id', 0)
     policy = _get_or_create_interview_policy(co)
     application_ids = request.form.getlist('application_ids')
-
     if not application_ids:
         return jsonify({'error': 'No candidates selected.'})
+
+    # G24: every candidate must be reachable from this session's scope
+    try:
+        ids = [int(aid) for aid in application_ids]
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid candidate selection.'}), 400
+    if not all(_can_access_application(a) for a in ids):
+        return jsonify({'error': 'Forbidden'}), 403
+    application_ids = [str(a) for a in ids]
 
     candidates = query(f"""
         SELECT ja.application_id, ja.applicant_name, ja.applicant_email, ja.posting_id,
@@ -1644,6 +2046,17 @@ def auto_assign_confirm():
     if not application_ids:
         flash('No candidates selected.', 'danger')
         return redirect(url_for('recruitment.list_applications'))
+
+    # G25: every candidate must be reachable from this session's scope
+    try:
+        ids = [int(aid) for aid in application_ids]
+    except (TypeError, ValueError):
+        flash('Invalid candidate selection.', 'danger')
+        return redirect(url_for('recruitment.list_applications'))
+    if not all(_can_access_application(a) for a in ids):
+        flash('Access denied.', 'danger')
+        return redirect(url_for('recruitment.list_applications'))
+    application_ids = [str(a) for a in ids]
 
     candidates = query(f"""
         SELECT ja.application_id, ja.applicant_name, ja.applicant_email, ja.posting_id,
@@ -1722,3 +2135,158 @@ def auto_assign_confirm():
         flash('No interview slots could be assigned. Check the interview policy and try again.', 'warning')
 
     return redirect(url_for('recruitment.list_interviews'))
+
+# -- Internal Job Board (Employees) -------------------------------------------
+
+@recruit_bp.route('/internal-jobs')
+@login_required
+def internal_jobs():
+    co = session.get('company_id')
+    postings = query("""
+        SELECT jp.*, d.department_name, b.name as branch_name
+        FROM Job_Posting jp
+        JOIN Department d ON jp.department_id=d.department_id
+        JOIN Branch b ON jp.branch_id=b.branch_id
+        WHERE jp.status='Open'
+          AND jp.target_audience IN ('Internal','Both')
+          AND b.company_id=?
+        ORDER BY jp.created_at DESC
+    """, (co,))
+    return render_template('recruitment/internal_jobs.html', postings=postings)
+
+
+@recruit_bp.route('/internal-jobs/<int:pid>')
+@login_required
+def internal_job_detail(pid):
+    co = session.get('company_id')
+    posting = query("""
+        SELECT jp.*, d.department_name, b.name as branch_name
+        FROM Job_Posting jp
+        JOIN Department d ON jp.department_id=d.department_id
+        JOIN Branch b ON jp.branch_id=b.branch_id
+        WHERE jp.posting_id=? AND jp.status='Open'
+          AND jp.target_audience IN ('Internal','Both')
+          AND b.company_id=?
+    """, (pid, co), one=True)
+    if not posting:
+        flash('Posting not found or not open to internal applications.', 'danger')
+        return redirect(url_for('recruitment.internal_jobs'))
+    return render_template('recruitment/internal_job_detail.html', posting=posting)
+
+
+@recruit_bp.route('/internal-jobs/<int:pid>/apply', methods=['POST'])
+@login_required
+def internal_apply(pid):
+    uid = session['user_id']
+    posting = query("""
+        SELECT jp.*, b.company_id FROM Job_Posting jp
+        JOIN Branch b ON jp.branch_id=b.branch_id
+        WHERE jp.posting_id=?
+    """, (pid,), one=True)
+    if not posting:
+        flash('Posting not found.', 'danger')
+        return redirect(url_for('recruitment.internal_jobs'))
+    if posting['status'] != 'Open':
+        flash('This posting is no longer accepting applications.', 'warning')
+        return redirect(url_for('recruitment.internal_job_detail', pid=pid))
+    if posting['target_audience'] not in ('Internal', 'Both'):
+        flash('This position is only open to external candidates. Internal applications are not accepted.', 'warning')
+        return redirect(url_for('recruitment.internal_job_detail', pid=pid))
+    if posting['company_id'] != session.get('company_id'):
+        flash('This posting belongs to another company.', 'danger')
+        return redirect(url_for('recruitment.internal_jobs'))
+
+    emp = query("""SELECT e.employee_id, e.full_name, e.personal_email, e.email, e.is_active
+                   FROM Employee e WHERE e.employee_id=?""", (uid,), one=True)
+    if not emp or not emp['is_active']:
+        flash('Only active employees can apply for internal positions.', 'danger')
+        return redirect(url_for('recruitment.internal_jobs'))
+
+    dup = query("""SELECT 1 FROM Job_Application
+                   WHERE posting_id=? AND internal_employee_id=?
+                   LIMIT 1""", (pid, uid), one=True)
+    if dup:
+        flash('You have already applied for this position.', 'warning')
+        return redirect(url_for('recruitment.my_applications'))
+
+    resume_file = request.files.get('resume')
+    resume_path = None
+    if resume_file and resume_file.filename:
+        import uuid
+        ext = os.path.splitext(resume_file.filename)[1] or '.pdf'
+        filename = f"resume_{uuid.uuid4().hex}{ext}"
+        resume_dir = os.path.join(current_app.root_path, '..', 'uploads', 'resumes')
+        os.makedirs(resume_dir, exist_ok=True)
+        resume_file.save(os.path.join(resume_dir, filename))
+        resume_path = filename
+
+    applicant_email = emp['personal_email'] or emp['email'] or ''
+    app_id = execute("""
+        INSERT INTO Job_Application
+        (posting_id, company_id, applicant_name, applicant_email, applicant_phone, resume_path, cover_letter,
+         source, applicant_type, internal_employee_id, status)
+        VALUES (?,?,?,?,?,?,?,'Portal','Internal',?,'New')
+    """, (pid, posting['company_id'], emp['full_name'], applicant_email,
+          '', resume_path, request.form.get('cover_letter', ''),
+          uid))
+    log_audit('INTERNAL_APPLY', 'Recruitment',
+              f'Employee {uid} applied internally for posting #{pid}',
+              action_details={'posting_id': pid, 'application_id': app_id})
+
+    from app.notifications.routes import send_in_app_notification
+    try:
+        send_in_app_notification(uid, 'Application Received',
+                                 f'Your application for {posting["title"]} has been submitted.',
+                                 type='Info',
+                                 related_url=url_for('recruitment.my_applications'))
+    except Exception as e:
+        print(f"[INTERNAL APPLY] Notification failed: {e}")
+
+    return render_template('recruitment/internal_apply_confirm.html',
+                           posting=posting, application_id=app_id)
+
+
+# -- My Applications (Employee self-service) ----------------------------------
+
+@recruit_bp.route('/my-applications')
+@login_required
+def my_applications():
+    uid = session['user_id']
+    applications = query("""
+        SELECT ja.*, jp.title as job_title, jp.status as posting_status,
+               d.department_name, b.name as branch_name
+        FROM Job_Application ja
+        LEFT JOIN Job_Posting jp ON ja.posting_id=jp.posting_id
+        LEFT JOIN Department d ON jp.department_id=d.department_id
+        LEFT JOIN Branch b ON jp.branch_id=b.branch_id
+        WHERE ja.internal_employee_id=?
+        ORDER BY ja.applied_at DESC
+    """, (uid,))
+    return render_template('recruitment/my_applications.html', applications=applications)
+
+
+@recruit_bp.route('/my-applications/<int:aid>')
+@login_required
+def my_application_detail(aid):
+    uid = session['user_id']
+    app = query("""
+        SELECT ja.*, jp.title as job_title, jp.status as posting_status,
+               d.department_name, b.name as branch_name
+        FROM Job_Application ja
+        LEFT JOIN Job_Posting jp ON ja.posting_id=jp.posting_id
+        LEFT JOIN Department d ON jp.department_id=d.department_id
+        LEFT JOIN Branch b ON jp.branch_id=b.branch_id
+        WHERE ja.application_id=? AND ja.internal_employee_id=?
+    """, (aid, uid), one=True)
+    if not app:
+        return _deny_access()
+    interviews = query("""
+        SELECT scheduled_at, status, result FROM Interview
+        WHERE application_id=? ORDER BY scheduled_at DESC
+    """, (aid,))
+    contract = query("""
+        SELECT status, offer_date, start_date FROM Contract
+        WHERE application_id=?
+    """, (aid,), one=True)
+    return render_template('recruitment/my_application_detail.html',
+                           app=app, interviews=interviews, contract=contract)

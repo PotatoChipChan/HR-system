@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}My Applications{% endblock %}
+{% block page_title %}My Applications{% endblock %}
+{% block content %}
+<div class="card fade-in">
+  <div class="sec-title">
+    <h3 style="font-size:15px;color:var(--text-secondary)">Track the status of your internal applications</h3>
+  </div>
+  {% if applications %}
+  <table class="tbl">
+    <thead>
+      <tr><th>Position</th><th>Department</th><th>Branch</th><th>Applied</th><th>Status</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for a in applications %}
+      <tr>
+        <td><strong>{{ a.job_title or '—' }}</strong></td>
+        <td>{{ a.department_name or '—' }}</td>
+        <td>{{ a.branch_name or '—' }}</td>
+        <td>{{ a.applied_at[:10] }}</td>
+        <td><span class="badge {{ 'badge-green' if a.status=='Shortlisted' else 'badge-blue' if a.status in ('Interview Scheduled','Offered') else 'badge-red' if a.status in ('Rejected','Withdrawn') else '' }}">{{ a.status }}</span></td>
+        <td><a href="{{ url_for('recruitment.my_application_detail', aid=a.application_id) }}" class="btn btn-sm">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><div class="icon">📁</div><h3>You haven't applied to any internal positions yet</h3>
+    <p style="margin-top:12px"><a class="btn btn-primary" href="{{ url_for('recruitment.internal_jobs') }}">Browse Internal Jobs</a></p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

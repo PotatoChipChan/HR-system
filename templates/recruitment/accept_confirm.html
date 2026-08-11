@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Accept Offer{% endblock %}
+{% block page_title %}Accept Offer{% endblock %}
+{% block content %}
+<div class="card fade-in" style="max-width:640px;margin:0 auto">
+  <h2 style="margin-bottom:8px">Offer for {{ contract.position }}</h2>
+  <p style="color:#777;font-size:14px;margin-bottom:24px">
+    Dear {{ contract.applicant_name }}, please review the offer details below and confirm your decision.
+  </p>
+
+  <div style="background:#f0faf3;padding:16px 20px;border-radius:8px;margin-bottom:24px;font-size:14px;line-height:1.8">
+    <strong>Offer Details</strong><br>
+    Position: {{ contract.position }}<br>
+    Start Date: {{ contract.start_date }}<br>
+    Salary: RM {{ '{:,.2f}'.format(contract.base_salary or 0) }}<br>
+    Employment Type: {{ contract.employment_type }}<br>
+    Offer Date: {{ contract.offer_date or '-' }}<br>
+    Expires: {{ expires_display or 'N/A' }}
+  </div>
+
+  <form method="POST" enctype="multipart/form-data" style="margin-bottom:12px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="token" value="{{ token }}">
+    <label style="font-weight:600;font-size:14px">Signed contract (PDF, optional)</label>
+    <input type="file" name="signed_doc" accept=".pdf,.jpg,.png" class="form-control" style="margin:8px 0 16px">
+    <button type="submit" class="btn btn-success" style="width:100%">✅ Accept Offer</button>
+  </form>
+
+  <form method="POST" style="margin-bottom:12px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="token" value="{{ token }}">
+    <input type="hidden" name="action" value="decline">
+    <button type="submit" class="btn btn-outline-danger" style="width:100%"
+            onclick="return confirm('Are you sure you want to decline this offer?');">
+      Decline Offer
+    </button>
+  </form>
+
+  <p style="font-size:12px;color:#999;margin-top:8px">
+    This secure link is unique to you and expires on {{ expires_display or 'the listed date' }}.
+    If it has expired, contact HR for a new link.
+  </p>
+</div>
+{% endblock %}

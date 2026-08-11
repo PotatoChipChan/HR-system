@@ -71,6 +71,88 @@ def migrate_increment_policy_table():
     print("[OK] Increment_Policy table migration completed.")
 
 
+def migrate_scheduler_lock_table():
+    """Create the scheduler_lock table used by the payroll scheduler to prevent
+    multiple server workers from running the daily auto-generation concurrently."""
+    con = get_connection()
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS scheduler_lock (
+            lock_name   TEXT PRIMARY KEY,
+            process_id  TEXT,
+            locked_at   TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    con.commit()
+    con.close()
+    print("[OK] scheduler_lock table migration completed.")
+
+
+def migrate_contract_security():
+    """Rebuild the Contract table adding secure offer-acceptance columns
+    (accept_token, token_expires_at, accepted_at) and the 'Declined' status.
+
+    SQLite cannot ALTER a CHECK constraint, so existing databases get a
+    transactional rebuild (copy → drop → rename). Idempotent – safe to re-run."""
+    con = get_connection()
+    cols = [r[1] for r in con.execute("PRAGMA table_info(Contract)")]
+    if 'accept_token' in cols:
+        con.close()
+        print("[OK] Contract security migration already applied.")
+        return
+
+    from datetime import datetime
+    print("[MIGRATION] Rebuilding Contract table with accept_token columns ...")
+    con.execute("PRAGMA foreign_keys = OFF")
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        con.execute("""
+            CREATE TABLE Contract_new (
+                contract_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                application_id    INTEGER NOT NULL UNIQUE,
+                employee_id       INTEGER,
+                offer_date        TEXT,
+                start_date        TEXT,
+                position          TEXT,
+                department_id     INTEGER,
+                work_start_time   TEXT,
+                work_end_time     TEXT,
+                base_salary       REAL,
+                employment_type   TEXT,
+                contract_doc_path TEXT,
+                signed_doc_path   TEXT,
+                status            TEXT DEFAULT 'Draft'
+                                   CHECK(status IN ('Draft','Sent','Signed','Accepted','Declined')),
+                created_at        TEXT DEFAULT (datetime('now')),
+                signed_at         TEXT,
+                accept_token      TEXT UNIQUE,
+                token_expires_at  TEXT,
+                accepted_at       TEXT,
+                FOREIGN KEY (application_id)  REFERENCES Job_Application(application_id),
+                FOREIGN KEY (employee_id)     REFERENCES Employee(employee_id),
+                FOREIGN KEY (department_id)   REFERENCES Department(department_id)
+            )
+        """)
+        common = ("contract_id", "application_id", "employee_id", "offer_date",
+                  "start_date", "position", "department_id", "work_start_time",
+                  "work_end_time", "base_salary", "employment_type",
+                  "contract_doc_path", "signed_doc_path", "status",
+                  "created_at", "signed_at")
+        con.execute(f"""
+            INSERT INTO Contract_new ({', '.join(common)})
+            SELECT {', '.join(common)} FROM Contract
+        """)
+        con.execute("DROP TABLE Contract")
+        con.execute("ALTER TABLE Contract_new RENAME TO Contract")
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.execute("PRAGMA foreign_keys = ON")
+        con.close()
+    print("[OK] Contract security migration completed.")
+
+
 def migrate_department_manager_id():
     """Add department_manager_id column to Department table if it doesn't exist."""
     con = get_connection()
@@ -83,6 +165,100 @@ def migrate_department_manager_id():
     con.commit()
     con.close()
     print("[OK] Department manager migration completed.")
+
+
+def migrate_recruitment_audience():
+    """Add audience/ownership columns to the recruitment tables:
+
+    - Job_Posting.target_audience      ('Internal','External','Both')
+    - Vacancy_Request.target_audience  (same)
+    - Job_Application.company_id               (explicit company ownership)
+    - Job_Application.applicant_type          ('Internal','External')
+    - Job_Application.internal_employee_id    (link for internal applicants)
+
+    Legacy rows are backfilled inside the same transaction: existing postings
+    and requests become 'External'; applications get company_id resolved via
+    their posting's branch (applications with NULL posting_id keep NULL and are
+    Admin-only until assigned). ALTER ADD COLUMN with DEFAULT 'Both' assigns
+    'Both' to existing rows immediately, so the backfill UPDATE runs only when
+    the column was newly added -- never on re-runs. Idempotent: safe to re-run.
+    """
+    con = get_connection()
+    cur = con.cursor()
+
+    jp_cols = [r[1] for r in cur.execute("PRAGMA table_info(Job_Posting)")]
+    vr_cols = [r[1] for r in cur.execute("PRAGMA table_info(Vacancy_Request)")]
+    ja_cols = [r[1] for r in cur.execute("PRAGMA table_info(Job_Application)")]
+
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        if 'target_audience' not in jp_cols:
+            print("[MIGRATION] Adding target_audience to Job_Posting ...")
+            cur.execute("""ALTER TABLE Job_Posting ADD COLUMN
+                           target_audience TEXT NOT NULL DEFAULT 'Both'
+                           CHECK(target_audience IN ('Internal','External','Both'))""")
+            cur.execute("UPDATE Job_Posting SET target_audience='External'")
+
+        if 'target_audience' not in vr_cols:
+            print("[MIGRATION] Adding target_audience to Vacancy_Request ...")
+            cur.execute("""ALTER TABLE Vacancy_Request ADD COLUMN
+                           target_audience TEXT NOT NULL DEFAULT 'Both'
+                           CHECK(target_audience IN ('Internal','External','Both'))""")
+            cur.execute("UPDATE Vacancy_Request SET target_audience='External'")
+
+        if 'applicant_type' not in ja_cols:
+            print("[MIGRATION] Adding applicant_type to Job_Application ...")
+            cur.execute("""ALTER TABLE Job_Application ADD COLUMN
+                           applicant_type TEXT NOT NULL DEFAULT 'External'
+                           CHECK(applicant_type IN ('Internal','External'))""")
+
+        if 'internal_employee_id' not in ja_cols:
+            print("[MIGRATION] Adding internal_employee_id to Job_Application ...")
+            cur.execute("""ALTER TABLE Job_Application ADD COLUMN
+                           internal_employee_id INTEGER
+                           REFERENCES Employee(employee_id)""")
+
+        if 'company_id' not in ja_cols:
+            print("[MIGRATION] Adding company_id to Job_Application ...")
+            cur.execute("""ALTER TABLE Job_Application ADD COLUMN
+                           company_id INTEGER REFERENCES Company(company_id)""")
+            cur.execute("""
+                UPDATE Job_Application SET company_id = (
+                    SELECT b.company_id FROM Job_Posting jp
+                    JOIN Branch b ON jp.branch_id=b.branch_id
+                    WHERE jp.posting_id=Job_Application.posting_id)
+                WHERE posting_id IS NOT NULL
+            """)
+            null_rows = cur.execute(
+                "SELECT COUNT(*) AS n FROM Job_Application WHERE company_id IS NULL"
+            ).fetchone()['n']
+            if null_rows:
+                print(f"[MIGRATION] {null_rows} application(s) without a posting "
+                      f"kept company_id NULL (Admin-only until assigned)")
+
+        cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_job_app_internal_unique
+                       ON Job_Application(posting_id, internal_employee_id)
+                       WHERE internal_employee_id IS NOT NULL""")
+        cur.execute("""CREATE INDEX IF NOT EXISTS idx_job_posting_audience_status
+                       ON Job_Posting(target_audience, status)""")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_job_posting_branch ON Job_Posting(branch_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_job_posting_department ON Job_Posting(department_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_job_app_company ON Job_Application(company_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_job_app_applicant_type ON Job_Application(applicant_type)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_job_app_internal_emp ON Job_Application(internal_employee_id)")
+
+        fk_violations = cur.execute("PRAGMA foreign_key_check").fetchall()
+        if fk_violations:
+            con.rollback()
+            raise RuntimeError(
+                f"Foreign key violations after recruitment migration: {[dict(v) for v in fk_violations[:5]]}")
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+    print("[OK] Recruitment audience migration completed.")
 
 
 def backfill_position_links(con=None):
@@ -542,7 +718,10 @@ def init_db():
     migrate_add_branch_address_fields()
     migrate_attendance_request_table()
     migrate_increment_policy_table()
+    migrate_scheduler_lock_table()
+    migrate_contract_security()
     migrate_department_manager_id()
+    migrate_recruitment_audience()
     migrate_position_catalog()
     
     con = get_connection()

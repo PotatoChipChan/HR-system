@@ -13,9 +13,20 @@ def create_app():
                 template_folder='../templates',
                 static_folder='../static')
 
-    # Secret key for sessions (change in production!)
-    app.secret_key = os.environ.get('SECRET_KEY', 'smarthr-dev-secret-2026-change-in-prod')
-    
+    # ── Secret key ────────────────────────────────────────────────────────
+    # Production startup fails hard when SECRET_KEY is missing or still the
+    # development fallback. The fallback is only accepted for local dev
+    # (FLASK_DEBUG=true / FLASK_ENV=development).
+    DEV_SECRET = 'smarthr-dev-secret-2026-change-in-prod'
+    app.secret_key = os.environ.get('SECRET_KEY', DEV_SECRET)
+    dev_mode = (os.environ.get('FLASK_DEBUG', '').lower() in ('true', '1', 'yes') or
+                os.environ.get('FLASK_ENV', '').lower() == 'development')
+    if app.secret_key == DEV_SECRET and not dev_mode:
+        raise RuntimeError(
+            "SECRET_KEY must be set in .env for production use. "
+            "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+
     from datetime import timedelta
     # Security: Standard session timeout (inactivity)
     app.config['SESSION_PERMANENT'] = True
@@ -27,6 +38,8 @@ def create_app():
 
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'leave'), exist_ok=True)
+    os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'resumes'), exist_ok=True)
+    os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'contracts'), exist_ok=True)
     os.makedirs(app.instance_path, exist_ok=True)
 
     # ── Mail Configuration ─────────────────────────────────────────────────
@@ -39,13 +52,28 @@ def create_app():
     app.config['MAIL_TIMEOUT'] = 15
     mail.init_app(app)
 
-    # ── Secure Cookie Settings (enable via FORCE_HTTPS_SESSION env for prod) ──────
+    # ── Session cookie hardening ───────────────────────────────────────────
+    # HttpOnly + SameSite=Lax are ALWAYS on (defence-in-depth against XSS
+    # cookie theft and cross-site request forgery at the cookie layer).
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE='Lax',
+    )
+    # SESSION_COOKIE_SECURE is opt-in: set FORCE_HTTPS_SESSION=true when the
+    # app is served over HTTPS (TLS terminates at this process or at a proxy
+    # with ProxyFix configured below).
     if os.environ.get('FORCE_HTTPS_SESSION', '').lower() in ('true', '1', 'yes'):
-        app.config.update(
-            SESSION_COOKIE_SECURE=True,
-            SESSION_COOKIE_HTTPONLY=True,
-            SESSION_COOKIE_SAMESITE='Lax'
-        )
+        app.config['SESSION_COOKIE_SECURE'] = True
+
+    # ── Trusted proxy (optional) ───────────────────────────────────────────
+    # When running behind a reverse proxy that sets X-Forwarded-For/Proto,
+    # set TRUSTED_PROXY=true. The rate limiter then (and only then) honours
+    # X-Forwarded-For; without it the header is ignored to prevent IP spoofing.
+    trusted_proxy = os.environ.get('TRUSTED_PROXY', '').lower() in ('true', '1', 'yes')
+    if trusted_proxy:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app,
+                                x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
     # ── Register Blueprints ────────────────────────────────────────────────
     from app.auth.routes         import auth_bp
@@ -94,23 +122,57 @@ def create_app():
     start_payroll_scheduler(app)
 
     # ── Rate Limiting ───────────────────────────────────────────────────────
+    # Applied globally via before_request. Earlier this list mistakenly
+    # SKIPPED auth.login / auth.forgot_password / auth.reset_password, leaving
+    # the most brute-force-sensitive endpoints unprotected. They now get the
+    # strictest limits of all.
     from app.rate_limiter import limiter
+
+    _AUTH_LIMITS = {
+        'auth.login':             (10, 60),    # 10 POSTs / minute / IP
+        'auth.forgot_password':   (5, 60),     # 5  POSTs / minute / IP
+        'auth.reset_password':    (5, 60),     # 5  POSTs / minute / IP
+    }
 
     @app.before_request
     def apply_rate_limit():
-        from flask import request, jsonify, session
-        # Skip static files and the login endpoint
-        if request.endpoint in (None, 'static', 'auth.login', 'auth.forgot_password', 'auth.reset_password'):
+        from flask import request, jsonify, current_app
+        # Skip static files and the health endpoint only
+        if request.endpoint in (None, 'static', 'health'):
             return
-        # Stricter limit for auth POST endpoints
-        if request.endpoint == 'auth.login' and request.method == 'POST':
-            allowed = limiter.is_allowed(limit=10, window=60)
+        if request.method == 'POST' and request.endpoint in _AUTH_LIMITS:
+            limit, window = _AUTH_LIMITS[request.endpoint]
         else:
-            allowed = limiter.is_allowed(limit=200, window=60)
+            limit, window = 200, 60
+        allowed = limiter.is_allowed(limit=limit, window=window)
         if not allowed:
             current_app.logger.warning("Rate limit exceeded for %s on %s",
                                        limiter._get_client_ip(), request.endpoint)
             return jsonify({"error": "Too many requests. Please try again later."}), 429
+
+    # ── CSRF Protection ─────────────────────────────────────────────────────
+    # Every state-changing request is validated against the session token.
+    # Set app.config['CSRF_ENABLED'] = False only in test fixtures that
+    # deliberately exercise routes without CSRF.
+    app.config.setdefault('CSRF_ENABLED', True)
+
+    @app.before_request
+    def apply_csrf_check():
+        from flask import current_app, jsonify, request
+        if not current_app.config.get('CSRF_ENABLED', True):
+            return
+        if request.endpoint in (None, 'static', 'health'):
+            return
+        from app.csrf import validate_csrf
+        if not validate_csrf():
+            return jsonify({"error": "CSRF token missing or invalid."}), 400
+
+    # ── CSRF token available to every template (and minted in the session) ──
+    from app.csrf import get_csrf_token
+
+    @app.context_processor
+    def inject_csrf_token():
+        return dict(csrf_token=get_csrf_token())
 
     @app.context_processor
     def inject_notifications():

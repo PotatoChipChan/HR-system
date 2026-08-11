@@ -1,10 +1,9 @@
-"""app/rate_limiter.py – Sliding-window rate limiter with X-Forwarded-For IP extraction"""
+"""app/rate_limiter.py – Sliding-window rate limiter with proxy-aware IP extraction"""
 import os
 import time
 import uuid
 from collections import defaultdict, deque
-from functools import wraps
-from flask import request, jsonify, current_app
+from flask import request
 
 
 _LOCAL_IPS = {"::1", "127.0.0.1", "localhost"}
@@ -14,16 +13,23 @@ def _is_dev():
     return os.environ.get("FLASK_ENV") == "development"
 
 
+def _trusts_proxy():
+    return os.environ.get("TRUSTED_PROXY", "").lower() in ("true", "1", "yes")
+
+
 class RateLimiter:
     def __init__(self):
         self._buckets = defaultdict(lambda: defaultdict(lambda: deque()))
 
     def _get_client_ip(self):
-        xff = request.headers.get("X-Forwarded-For")
-        if xff:
-            ip = xff.split(",")[0].strip()
-        else:
-            ip = request.remote_addr or "unknown"
+        # Only honour X-Forwarded-For when the deployment explicitly declares
+        # a trusted reverse proxy. Otherwise a spoofed header would let an
+        # attacker bypass per-client limits.
+        if _trusts_proxy():
+            xff = request.headers.get("X-Forwarded-For")
+            if xff:
+                return xff.split(",")[0].strip() or request.remote_addr or "unknown"
+        ip = request.remote_addr or "unknown"
         # Bypass rate limiting for localhost in dev mode by randomising the key
         if ip in _LOCAL_IPS and _is_dev():
             return f"{ip}-{uuid.uuid4().hex[:8]}"
@@ -55,17 +61,3 @@ class RateLimiter:
 
 
 limiter = RateLimiter()
-
-
-def rate_limit(limit=100, window=60):
-    """Decorator: apply per-route rate limiting."""
-    def decorator(f):
-        @wraps(f)
-        def wrapped(*args, **kwargs):
-            if not limiter.is_allowed(limit=limit, window=window):
-                ip = limiter._get_client_ip()
-                current_app.logger.warning("Rate limit exceeded for %s on %s", ip, request.endpoint)
-                return jsonify({"error": "Too many requests. Please try again later."}), 429
-            return f(*args, **kwargs)
-        return wrapped
-    return decorator

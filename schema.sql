@@ -542,6 +542,8 @@ CREATE TABLE IF NOT EXISTS Job_Posting (
     description     TEXT,
     requirements    TEXT,
     status          TEXT DEFAULT 'Open' CHECK(status IN ('Open','Closed','Filled')),
+    target_audience TEXT NOT NULL DEFAULT 'Both'
+                     CHECK(target_audience IN ('Internal','External','Both')),
     posted_by       INTEGER,
     created_at      TEXT DEFAULT (datetime('now')),
     closed_at       TEXT,
@@ -552,7 +554,8 @@ CREATE TABLE IF NOT EXISTS Job_Posting (
 
 CREATE TABLE IF NOT EXISTS Job_Application (
     application_id  INTEGER PRIMARY KEY AUTOINCREMENT,
-    posting_id      INTEGER NOT NULL,
+    posting_id      INTEGER,
+    company_id      INTEGER,
     applicant_name  TEXT NOT NULL,
     applicant_email TEXT NOT NULL,
     applicant_phone TEXT,
@@ -561,6 +564,9 @@ CREATE TABLE IF NOT EXISTS Job_Application (
     resume_path     TEXT,
     cover_letter    TEXT,
     source          TEXT DEFAULT 'Manual' CHECK(source IN ('Email','Manual','Portal')),
+    applicant_type  TEXT NOT NULL DEFAULT 'External'
+                     CHECK(applicant_type IN ('Internal','External')),
+    internal_employee_id INTEGER REFERENCES Employee(employee_id),
     status          TEXT DEFAULT 'New'
                      CHECK(status IN ('New','Shortlisted','Interview','Offered','Hired','Rejected')),
     ai_score        REAL,
@@ -569,6 +575,7 @@ CREATE TABLE IF NOT EXISTS Job_Application (
     reviewed_by     INTEGER,
     reviewed_at     TEXT,
     FOREIGN KEY (posting_id)   REFERENCES Job_Posting(posting_id) ON DELETE CASCADE,
+    FOREIGN KEY (company_id)   REFERENCES Company(company_id),
     FOREIGN KEY (reviewed_by)  REFERENCES Employee(employee_id)
 );
 
@@ -607,12 +614,21 @@ CREATE TABLE IF NOT EXISTS Contract (
     contract_doc_path TEXT,
     signed_doc_path   TEXT,
     status            TEXT DEFAULT 'Draft'
-                       CHECK(status IN ('Draft','Sent','Signed','Accepted')),
+                       CHECK(status IN ('Draft','Sent','Signed','Accepted','Declined')),
     created_at        TEXT DEFAULT (datetime('now')),
     signed_at         TEXT,
+    accept_token      TEXT UNIQUE,
+    token_expires_at  TEXT,
+    accepted_at       TEXT,
     FOREIGN KEY (application_id)  REFERENCES Job_Application(application_id),
     FOREIGN KEY (employee_id)     REFERENCES Employee(employee_id),
     FOREIGN KEY (department_id)   REFERENCES Department(department_id)
+);
+
+CREATE TABLE IF NOT EXISTS scheduler_lock (
+    lock_name   TEXT PRIMARY KEY,
+    process_id  TEXT,
+    locked_at   TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS Interview_Policy (
@@ -703,6 +719,8 @@ CREATE TABLE IF NOT EXISTS Vacancy_Request (
     description     TEXT,
     requirements    TEXT,
     reason          TEXT,
+    target_audience TEXT NOT NULL DEFAULT 'Both'
+                     CHECK(target_audience IN ('Internal','External','Both')),
     status          TEXT DEFAULT 'Pending' CHECK(status IN ('Pending','Approved','Rejected')),
     rejection_reason TEXT,
     reviewed_by     INTEGER,

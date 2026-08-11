@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="csrf-token" content="{{ csrf_token }}">
 <title>{% block title %}SmartHR{% endblock %} | AI-Powered HR Platform</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -206,6 +207,7 @@
           Recruitment
         </div>
         <div class="nav-section-items">
+      {% if session.user_role in ('Admin','HR','HR Manager','HR Director','Manager') or session.get('is_dept_manager') %}
       <a class="nav-item {% if request.blueprint=='recruitment' and request.endpoint=='recruitment.list_postings' %}active{% endif %}"
          href="{{ url_for('recruitment.list_postings') }}">
         <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="3" y="7" width="4" height="8" rx="1" stroke="currentColor"/><rect x="11" y="7" width="4" height="8" rx="1" stroke="currentColor"/><rect x="3" y="2" width="12" height="3" rx="1.5" fill="currentColor"/></svg>
@@ -214,9 +216,10 @@
       <a class="nav-item {% if request.blueprint=='recruitment' and request.endpoint=='recruitment.list_vacancy_requests' %}active{% endif %}"
          href="{{ url_for('recruitment.list_vacancy_requests') }}">
         <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="3" y="2" width="12" height="14" rx="2" stroke="currentColor"/><path d="M6 6h6M6 9h6M6 12h4" stroke="currentColor"/></svg>
-         Applications (Internal)
+         Vacancy Requests
          {% if pending_vacancy_count > 0 %}<span class="nav-badge" style="background:#f59e0b">{{ pending_vacancy_count }}</span>{% endif %}
       </a>
+      {% endif %}
       {% if session.user_role in ('Admin','HR','HR Manager','HR Director','Manager') %}
       <a class="nav-item {% if request.blueprint=='recruitment' and request.endpoint=='recruitment.list_applications' %}active{% endif %}"
          href="{{ url_for('recruitment.list_applications') }}">
@@ -238,6 +241,18 @@
       <a class="nav-item" href="{{ url_for('recruitment.careers') }}" target="_blank">
         <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><path d="M5 3v12M3 5h12M15 15H3" stroke="currentColor" stroke-width="1.5"/><path d="M9 5v8M5 9h8" stroke="currentColor" stroke-width="1.5"/></svg>
         Careers Page&nbsp;↗
+      </a>
+      {% endif %}
+      {% if session.user_role not in ('Admin','HR','HR Manager','HR Director') %}
+      <a class="nav-item {% if request.blueprint=='recruitment' and request.endpoint=='recruitment.internal_jobs' %}active{% endif %}"
+         href="{{ url_for('recruitment.internal_jobs') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><path d="M3 5h12v10H3z" stroke="currentColor"/><path d="M6 5V3h6v2" stroke="currentColor"/><path d="M3 9h12" stroke="currentColor"/></svg>
+        Internal Job Board
+      </a>
+      <a class="nav-item {% if request.blueprint=='recruitment' and request.endpoint=='recruitment.my_applications' %}active{% endif %}"
+         href="{{ url_for('recruitment.my_applications') }}">
+        <svg class="nav-icon" fill="none" viewBox="0 0 18 18"><rect x="3" y="2" width="12" height="14" rx="2" stroke="currentColor"/><path d="M6 6h6M6 9h6M6 12h4" stroke="currentColor"/></svg>
+        My Applications
       </a>
       {% endif %}
 
@@ -493,5 +508,68 @@ window.addEventListener('DOMContentLoaded', function() {
 </script>
 {% endif %}
 {% block scripts %}{% endblock %}
+<script>
+// CSRF: attach the session token to every same-origin state-changing request.
+(function() {
+  var meta = document.querySelector('meta[name="csrf-token"]');
+  if (!meta) return;
+  var token = meta.getAttribute('content');
+  var unsafe = { POST: 1, PUT: 1, PATCH: 1, DELETE: 1 };
+  function sameOrigin(url) {
+    if (!url) return false;
+    if (/^(\/|#)/.test(url)) return true;              // relative URL
+    try { return new URL(url, location.origin).origin === location.origin; }
+    catch (e) { return false; }
+  }
+  // Standard HTML forms (including forms added dynamically).
+  document.addEventListener('submit', function(event) {
+    var form = event.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    var method = (form.getAttribute('method') || 'GET').toUpperCase();
+    var action = form.getAttribute('action') || location.href;
+    if (!unsafe[method] || !sameOrigin(action)) return;
+    var field = form.querySelector('input[name="csrf_token"]');
+    if (!field) {
+      field = document.createElement('input');
+      field.type = 'hidden';
+      field.name = 'csrf_token';
+      form.appendChild(field);
+    }
+    field.value = token;
+  }, true);
+  // fetch()
+  var origFetch = window.fetch;
+  if (origFetch) {
+    window.fetch = function(input, init) {
+      init = init || {};
+      var method = (init.method || (input && input.method) || 'GET').toUpperCase();
+      var url = typeof input === 'string' ? input : (input && input.url);
+      if (unsafe[method] && sameOrigin(url) && !init.headers) {
+        init.headers = new Headers(init.headers);
+      }
+      if (unsafe[method] && sameOrigin(url)) {
+        var h = init.headers instanceof Headers ? init.headers : new Headers(init.headers);
+        if (!h.has('X-CSRF-Token')) h.set('X-CSRF-Token', token);
+        init.headers = h;
+      }
+      return origFetch.call(this, input, init);
+    };
+  }
+  // XMLHttpRequest
+  var origOpen = XMLHttpRequest.prototype.open;
+  var origSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function(method, url) {
+    this._csrfUrl = url;
+    this._csrfMethod = (method || 'GET').toUpperCase();
+    return origOpen.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.send = function(body) {
+    if (unsafe[this._csrfMethod] && sameOrigin(this._csrfUrl)) {
+      this.setRequestHeader('X-CSRF-Token', token);
+    }
+    return origSend.apply(this, arguments);
+  };
+})();
+</script>
 </body>
 </html>

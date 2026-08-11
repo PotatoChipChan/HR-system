@@ -1,0 +1,11 @@
+{
+  "name": "SmartHR Flask app",
+  "kind": "flask",
+  "bootstrap": ["pip install -r requirements.txt"],
+  "build": [],
+  "test": ["run_tests.bat"],
+  "start": "run_server.bat",
+  "port": 5000,
+  "readinessPath": "/",
+  "evidence": ["Detected Python project", "Detected Flask dependency"]
+}

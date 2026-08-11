@@ -76,6 +76,7 @@ body{font-family:Inter,system-ui,-apple-system,sans-serif;background:#fff;min-he
     {% endwith %}
 
     <form method="POST" action="{{ url_for('auth.login') }}" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="form-group">
         <label class="form-label" for="email">Email</label>
         <input class="form-input" type="email" id="email" name="email" placeholder="name@company.com" required autocomplete="email" autofocus>

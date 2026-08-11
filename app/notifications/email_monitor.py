@@ -2,14 +2,12 @@
 import os
 import re
 import uuid
-import socket
 import imaplib
 import email as email_lib
 from datetime import datetime, timedelta
 from email.header import decode_header
-from flask import render_template, current_app
+from flask import current_app
 from app.database import query, execute, log_audit
-from app.notifications.email_service import send_email
 from app.notifications.email_parser import (
     parse_application_email, detect_offer_reply, extract_contract_id,
     is_application_email, is_auto_reply, is_promotional_email, extract_email,
@@ -198,6 +196,8 @@ def create_application_from_email(msg, parsed):
     resume_dir = os.path.join(current_app.root_path, '..', 'uploads', 'resumes')
     os.makedirs(resume_dir, exist_ok=True)
 
+    applicant_name = (parsed.get('name') or '').strip() or email_addr
+
     app_id = execute("""
         INSERT INTO Job_Application
         (posting_id, applicant_name, applicant_email, applicant_phone,
@@ -206,7 +206,7 @@ def create_application_from_email(msg, parsed):
         VALUES (?,?,?,?,?,?,?,'Email','New',?)
     """, (
         posting['posting_id'] if posting else None,
-        parsed['name'],
+        applicant_name,
         email_addr,
         parsed.get('phone'),
         parsed.get('ic'),
@@ -262,86 +262,52 @@ def create_application_from_email(msg, parsed):
     return app_id
 
 
-def process_offer_accept(contract_id, msg=None):
-    # Ensure signed_doc_path and signed_at columns exist
-    for col in ['signed_doc_path TEXT', 'signed_at TEXT']:
-        try:
-            execute(f"ALTER TABLE Contract ADD COLUMN {col}")
-        except Exception:
-            pass
-
+def surface_offer_reply(contract_id, intent, msg=None):
+    """G31: an email containing an offer accept/decline intent NEVER mutates
+    Contract or Job_Application. A numeric contract ID alone is not
+    authorization -- acceptance happens only through the tokenized web flow
+    (recruitment.accept_offer). This function only:
+      - stores a signed PDF attachment (if any) for HR verification,
+      - writes an audit entry,
+      - notifies same-company HR/Admin that the reply needs manual review.
+    """
     contract = query("""
-        SELECT c.*, ja.applicant_name, ja.applicant_email
+        SELECT c.*, ja.applicant_name, ja.applicant_email, ja.company_id
         FROM Contract c
         JOIN Job_Application ja ON c.application_id=ja.application_id
         WHERE c.contract_id=?
     """, (contract_id,), one=True)
     if not contract:
-        return False
-    if contract['status'] not in ('Sent', 'Draft'):
+        print(f"[EMAIL MONITOR] Offer reply for unknown contract {contract_id} ignored")
         return False
 
     signed_path = None
     if msg:
-        signed_path = save_signed_contract_attachment(msg, contract_id)
+        try:
+            signed_path = save_signed_contract_attachment(msg, contract_id)
+        except Exception as e:
+            print(f"[EMAIL MONITOR] Failed to store signed attachment: {e}")
 
-    if signed_path:
-        execute("UPDATE Contract SET status='Signed', signed_doc_path=?, signed_at=datetime('now') WHERE contract_id=?",
-                (signed_path, contract_id))
-        log_audit('EMAIL_ACCEPT_OFFER', 'Recruitment',
-                  f'Offer {contract_id} accepted with signed PDF attached')
-    else:
-        execute("UPDATE Contract SET status='Accepted' WHERE contract_id=?",
-                (contract_id,))
-        log_audit('EMAIL_ACCEPT_OFFER', 'Recruitment',
-                  f'Offer {contract_id} accepted via reply but no signed PDF attached – HR should chase')
+    log_audit('EMAIL_OFFER_REPLY', 'Recruitment',
+              f'Offer {contract_id}: candidate replied with {intent} via email '
+              f'{f"(signed PDF stored at {signed_path})" if signed_path else "(no signed PDF attached)"} '
+              f'-- awaiting manual HR review; email cannot authorize acceptance')
 
     try:
-        html = render_template('emails/offer_accepted_confirmation.html',
-            employee_name=contract['applicant_name'],
-            title='Offer Accepted',
-            position=contract['position'],
-            start_date=contract['start_date'])
-        send_email("Offer Accepted – SmartHR",
-                   contract['applicant_email'], html)
+        from app.notifications.routes import send_in_app_to_company
+        if contract['company_id']:
+            send_in_app_to_company(
+                contract['company_id'],
+                ('Admin', 'HR', 'HR Manager', 'HR Director'),
+                f'Offer {intent.title()} via Email',
+                f'{contract["applicant_name"]} replied with a {intent} for offer #{contract_id} '
+                f'via email. Complete the action using the secure acceptance link or HR actions.',
+                type='Warning',
+                related_url='/recruitment/applications')
     except Exception as e:
-        print(f"[EMAIL MONITOR] Confirm email failed: {e}")
-
-    # Notify all Admin/HR users
-    try:
-        from app.notifications.routes import send_notification
-        hr_users = query("SELECT employee_id FROM Employee WHERE role_id IN (SELECT role_id FROM Role WHERE role_name IN ('Admin','HR','HR Manager','HR Director')) AND is_active=1")
-        for u in hr_users:
-            send_notification(
-                u['employee_id'],
-                'Offer Accepted',
-                f'{contract["applicant_name"]} accepted the offer for {contract["position"]}',
-                type='Offer',
-                related_url='/recruitment/applications'
-            )
-    except Exception as e:
-        print(f"[EMAIL MONITOR] Notification failed: {e}")
+        print(f"[EMAIL MONITOR] Review notification failed: {e}")
 
     return True
-
-
-def process_offer_decline(contract_id):
-    contract = query("""
-        SELECT c.*, ja.applicant_name, ja.applicant_email
-        FROM Contract c
-        JOIN Job_Application ja ON c.application_id=ja.application_id
-        WHERE c.contract_id=?
-    """, (contract_id,), one=True)
-    if not contract:
-        return False
-    if contract['status'] not in ('Sent', 'Draft'):
-        return False
-
-    execute("UPDATE Contract SET status='Declined' WHERE contract_id=?", (contract_id,))
-    execute("""UPDATE Job_Application SET status='Rejected'
-               WHERE application_id=?""", (contract['application_id'],))
-    log_audit('EMAIL_DECLINE_OFFER', 'Recruitment',
-              f'Offer {contract_id} declined via email reply')
     return True
 
 
@@ -433,16 +399,18 @@ def poll_inbox():
                 continue
 
             # Check for offer accept/decline replies (works for both
-            # fresh mailto emails and actual replies)
+            # fresh mailto emails and actual replies).
+            # G31: the reply only surfaces for manual HR review -- the email
+            # can never accept/decline the offer by itself.
             contract_id = extract_contract_id(subject, body)
             if contract_id:
                 intent = detect_offer_reply(subject, body)
                 if intent == 'accept' or (intent == 'ambiguous'
                         and subject and subject.lower().startswith('re:')):
-                    if process_offer_accept(contract_id, msg):
+                    if surface_offer_reply(contract_id, 'accept', msg):
                         new_accepts += 1
                 elif intent == 'decline':
-                    if process_offer_decline(contract_id):
+                    if surface_offer_reply(contract_id, 'decline', msg):
                         new_declines += 1
                 continue
 

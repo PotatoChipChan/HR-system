@@ -13,9 +13,9 @@
   Please review it carefully before accepting.
 </p>
 
-<!-- ACCEPT offer button (mailto – opens email client, safe) -->
+<!-- SECURE ACCEPT link (tokenized web flow – the ONLY accepted way to accept) -->
 <p style="margin:0 0 16px;text-align:center">
-  <a href="mailto:{{ hr_email }}?subject=ACCEPT%20OFFER%20{{ contract_id }}"
+  <a href="{{ accept_url }}"
      style="display:inline-block;background:#28a745;color:#fff;text-decoration:none;font-size:16px;font-weight:700;padding:14px 36px;border-radius:8px">
     ✅ Accept Offer
   </a>
@@ -26,17 +26,18 @@
   1. Open the attached PDF contract.<br>
   2. Use a free online PDF editor (such as SmallPDF, iLovePDF, or Adobe Acrobat online) to <strong>type your IC/Passport number</strong> in the space provided and <strong>draw your signature</strong> on the <strong>Employee Signature</strong> line.<br>
   3. Save the signed PDF to your device.<br>
-  4. Click the <strong>"Accept Offer"</strong> button above (or reply to this email with <strong>"ACCEPT OFFER {{ contract_id }}"</strong> in the subject line) and <strong>attach the signed PDF</strong>.
+  4. Click the <strong>"Accept Offer"</strong> button above to open the secure acceptance page, then submit your signed PDF there. This link is unique to you and expires on <strong>{{ token_expires_display }}</strong>.
 </p>
 
-<!-- DECLINE link (mailto) -->
-<p style="margin:0 0 16px;font-size:13px;color:#888">
-  To decline,
-  <a href="mailto:{{ hr_email }}?subject=DECLINE%20OFFER%20{{ contract_id }}"
-     style="color:#888;text-decoration:underline">click here</a>
-  or reply with <strong>"DECLINE OFFER {{ contract_id }}"</strong> in the subject line.
+<!-- G31: email replies are NOT processed -->
+<p style="margin:0 0 16px;font-size:13px;color:#b26a00;background:#fff8e6;padding:12px 16px;border-radius:6px">
+  <strong>Important:</strong> Replies to this email (including subjects such as "ACCEPT OFFER" or
+  "DECLINE OFFER") are <strong>not</strong> processed as acceptance. Email replies are only flagged
+  for our HR team to review manually. To accept or decline, please use the secure link above.
 </p>
+
 <p style="margin:0;font-size:12px;color:#999">
-  This offer expires in 14 days from the date of this email.
+  If you wish to decline this offer, open the secure link above and follow the decline option.
+  This offer expires {{ token_expires_display }}.
 </p>
 {% endblock %}

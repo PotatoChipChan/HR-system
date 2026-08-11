@@ -12,6 +12,16 @@ A Flask-based HR management system with face recognition attendance, leave manag
 
 ---
 
+## Prerequisites
+
+- Windows with **Python 3.10+** available on `PATH`.
+- The **Tesseract OCR executable** available on `PATH`; `pytesseract` is only the Python wrapper.
+- A compatible `dlib` / `face_recognition` installation for face attendance. The dependency is included in `requirements.txt`, so machines that cannot install it need compatible build tools or wheels before setup can complete.
+
+The setup script creates a fresh `.venv`, installs `requirements.txt`, applies the schema and runs the supported database migrations. Back up `instance/smarthr.db` before intentionally resetting it.
+
+---
+
 ## Default Login Credentials
 
 | Role | Email | Password |
@@ -73,7 +83,8 @@ smarthr_app/
 │   ├── payroll/
 │   │   ├── routes.py            # List payroll + payslip view
 │   │   ├── calculator.py        # EPF/SOCSO/EIS/PCB calculation engine
-│   │   └── helpers.py           # Immediate payroll reflection helpers (bonus, increment, claims)
+│   │   ├── helpers.py           # Immediate payroll reflection helpers (bonus, increment, claims)
+│   │   └── autogen.py           # Daily refresh of Draft payroll records
 │   ├── reports/routes.py        # Analytics and reports
 │   ├── audit/routes.py          # Audit log viewer
 │   ├── settings/routes.py       # Profile + password change
@@ -97,9 +108,13 @@ smarthr_app/
 │   ├── bonus/
 │   │   ├── __init__.py          # Bonus Proposal blueprint
 │   │   └── routes.py            # List, propose, approve/reject, bulk-action, pending-count API
-│   └── performance/
-│       ├── __init__.py          # Performance blueprint
-│       └── routes.py            # Scoring engine, list scores
+│   ├── performance/
+│   │   ├── __init__.py          # Performance blueprint
+│   │   ├── calculator.py        # Monthly and yearly performance calculations
+│   │   └── routes.py            # Scoring engine, list scores
+│   └── year_end/
+│       ├── __init__.py          # Year-End Review blueprint
+│       └── routes.py            # Unified review and compensation-policy routes
 ├── templates/
 │   ├── base.html                # Master template (sidebar, nav, email polling JS)
 │   ├── login.html               # Login page
@@ -123,7 +138,7 @@ smarthr_app/
 ├── static/
 │   ├── css/style.css            # Main stylesheet (green + dark SmartHR design)
 │   └── favicon.svg              # SmartHR logo
-├── uploads/                     # Invoice file uploads (gitignored)
+├── uploads/                     # Private invoices, ID/leave files, resumes, signatures and contracts (gitignored)
 ├── instance/smarthr.db          # SQLite database (auto-created by init_db.py)
 ├── schema.sql                   # SQLite schema
 ├── init_db.py                   # DB init + Malaysian demo data seeder
@@ -168,7 +183,7 @@ smarthr_app/
 
 - **Location:** `instance/smarthr.db`
 - **Backup:** Simply copy the `.db` file
-- **Reset:** Delete `smarthr.db` and re-run `python init_db.py`
+- **Reset:** Delete `instance/smarthr.db` and re-run `python init_db.py` (destroys local data)
 - **Schema file:** `schema.sql`
 
 ### Key Tables
@@ -222,10 +237,10 @@ smarthr_app/
 | Face Registration | Yes | Yes | No | No | No |
 | Face Attendance | Yes | Yes | Yes | Yes | Yes |
 
-> **Manager branch scoping:** Managers (including department managers) only see and act on
-> data for their own branch — leave approvals, invoice/expense claim review, external
-> applications, interviews, and attendance logs are all filtered to the manager's branch.
-> Attendance correction requests remain Admin/HR-only.
+> **Manager branch scoping:** Managers have branch-filtered leave, invoice/expense-claim,
+> application and interview list views. Every new recruitment detail or action route must
+> apply the same company and branch check before it is exposed. Attendance correction
+> requests remain Admin/HR-only.
 
 > **Department managers:** Assign an employee as a department manager via
 > **Organization → Departments → edit**. That user's `is_dept_manager` flag is set on login
@@ -260,7 +275,9 @@ smarthr_app/
 
 ## Configuration
 
-- **Secret Key:** `app.secret_key` in `app/__init__.py` — **change before production**
+- **Secret Key:** Set a long, unique `SECRET_KEY` in `.env`. The built-in fallback is for local development only.
+- **Production session cookies:** Set `FORCE_HTTPS_SESSION=true` when serving the app over HTTPS.
+- **Debug mode:** Keep `FLASK_DEBUG` unset or `false` outside local development.
 - **Max Upload Size:** 10 MB (configurable in `__init__.py`)
 - **Upload Folder:** `uploads/`
 - **DB Path:** `instance/smarthr.db`
@@ -279,11 +296,22 @@ MAIL_USE_TLS=true
 MAIL_USERNAME=your-email@gmail.com
 MAIL_PASSWORD=your-16-char-app-password
 MAIL_DEFAULT_SENDER=your-email@gmail.com
+SECRET_KEY=replace-with-a-long-random-value
+FORCE_HTTPS_SESSION=true
 ```
 4. Emails are sent as **multipart/alternative** (HTML + plain text) for better deliverability
 5. All email sends are logged in `AuditLog` (action: `SEND_EMAIL`)
 
 > For development testing, use [Mailtrap](https://mailtrap.io) (port 2525, no real delivery).
+
+## Testing
+
+The repository includes a small `tests/` suite. `pytest` is not part of the runtime requirements, so install it in the virtual environment before running:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install pytest
+.\.venv\Scripts\python.exe -m pytest -q
+```
 
 ---
 
@@ -575,7 +603,7 @@ See `app/payroll/calculator.py` for full implementation.
 
 ## Important Notes
 
-1. Change `SECRET_KEY` in `app/__init__.py` before any real deployment
+1. Set a strong, private `SECRET_KEY` in `.env` before any real deployment; do not rely on the development fallback.
 2. The `uploads/` folder should **not** be publicly accessible — serve through Flask with auth check
 3. `instance/smarthr.db` should be backed up regularly
 4. PDPA compliance: all data stays on local server, no cloud calls are made

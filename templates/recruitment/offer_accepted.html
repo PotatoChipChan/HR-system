@@ -1,12 +1,19 @@
 {% extends "base.html" %}
-{% block title %}Offer Accepted{% endblock %}
-{% block page_title %}Offer Accepted{% endblock %}
+{% block title %}{{ 'Offer Declined' if declined else 'Offer Accepted' }}{% endblock %}
+{% block page_title %}{{ 'Offer Declined' if declined else 'Offer Accepted' }}{% endblock %}
 {% block content %}
 <div class="card fade-in" style="text-align:center;padding:40px">
+  {% if declined %}
+  <div style="font-size:48px;margin-bottom:16px">😔</div>
+  <h2>Offer Declined</h2>
+  <p style="font-size:16px;color:#555;margin:16px 0"><strong>{{ applicant_name }}</strong>, you have declined the offer for <strong>{{ job_title }}</strong>.</p>
+  <p style="font-size:14px;color:#777">Our HR team has been notified. You can close this page.</p>
+  {% else %}
   <div style="font-size:48px;margin-bottom:16px">🎉</div>
   <h2>Congratulations, {{ applicant_name }}!</h2>
   <p style="font-size:16px;color:#555;margin:16px 0">You have accepted the offer for <strong>{{ job_title }}</strong>.</p>
   <p style="font-size:14px;color:#777">Our HR team will contact you shortly to complete the onboarding process.</p>
   <p style="font-size:13px;color:#999;margin-top:24px">You can now close this page.</p>
+  {% endif %}
 </div>
 {% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Internal Job Board{% endblock %}
+{% block page_title %}Internal Job Board{% endblock %}
+{% block content %}
+<div class="card fade-in">
+  <div class="sec-title">
+    <h3 style="font-size:15px;color:var(--text-secondary)">Open positions across your company — apply as an existing employee</h3>
+  </div>
+  {% if postings %}
+  <table class="tbl">
+    <thead>
+      <tr><th>Title</th><th>Department</th><th>Branch</th><th>Type</th><th>Salary</th><th>Posted</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for p in postings %}
+      <tr>
+        <td><strong>{{ p.title }}</strong></td>
+        <td>{{ p.department_name }}</td>
+        <td>{{ p.branch_name }}</td>
+        <td>{{ p.employment_type }}</td>
+        <td>{% if p.min_salary %}RM{{ p.min_salary }}{% if p.max_salary %}–{{ p.max_salary }}{% endif %}{% else %}—{% endif %}</td>
+        <td>{{ p.created_at[:10] }}</td>
+        <td><a href="{{ url_for('recruitment.internal_job_detail', pid=p.posting_id) }}" class="btn btn-sm">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><div class="icon">📋</div><h3>No internal openings right now</h3></div>
+  {% endif %}
+</div>
+{% endblock %}

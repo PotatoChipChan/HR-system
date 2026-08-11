@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Application Details{% endblock %}
+{% block page_title %}Application Details{% endblock %}
+{% block content %}
+<div class="card fade-in" style="margin-bottom:20px">
+  <div style="font-size:12px;margin-bottom:12px;color:var(--text-secondary)">
+    <a href="{{ url_for('recruitment.my_applications') }}" style="color:var(--g600)">‹ Back to My Applications</a>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:12px">
+    <div>
+      <h3 style="margin-bottom:8px">{{ app.job_title or '—' }}</h3>
+      <p><strong>Department:</strong> {{ app.department_name or '—' }} &middot; <strong>Branch:</strong> {{ app.branch_name or '—' }}</p>
+      <p><strong>Applied:</strong> {{ app.applied_at[:10] }} &middot; <strong>Status:</strong> <span class="badge {{ 'badge-green' if app.status=='Shortlisted' else 'badge-blue' if app.status in ('Interview Scheduled','Offered') else 'badge-red' if app.status in ('Rejected','Withdrawn') else '' }}">{{ app.status }}</span></p>
+      <p><strong>Posting status:</strong> {{ app.posting_status or '—' }}</p>
+    </div>
+  </div>
+  {% if app.cover_letter %}
+  <h4>Cover Letter</h4>
+  <p style="white-space:pre-wrap">{{ app.cover_letter }}</p>
+  {% endif %}
+</div>
+
+<div class="card fade-in" style="margin-bottom:20px">
+  <div class="sec-title">Interviews</div>
+  {% if interviews %}
+  <table class="tbl">
+    <thead><tr><th>Scheduled</th><th>Status</th><th>Result</th></tr></thead>
+    <tbody>
+      {% for iv in interviews %}
+      <tr>
+        <td>{{ iv.scheduled_at }}</td>
+        <td>{{ iv.status or '—' }}</td>
+        <td>{{ iv.result or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:var(--text-secondary);font-size:14px">No interviews scheduled yet.</p>
+  {% endif %}
+</div>
+
+<div class="card fade-in">
+  <div class="sec-title">Offer</div>
+  {% if contract %}
+  <table class="tbl">
+    <tbody>
+      <tr><th>Status</th><td>{{ contract.status }}</td></tr>
+      <tr><th>Offer date</th><td>{{ contract.offer_date or '—' }}</td></tr>
+      <tr><th>Start date</th><td>{{ contract.start_date or '—' }}</td></tr>
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:var(--text-secondary);font-size:14px">No offer has been issued yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -106,6 +106,41 @@ def send_notification(employee_id, title, message, type='Info', related_url=None
         print(f"[EMAIL] Failed to send email notification: {e}")
 
 
+def send_in_app_notification(employee_id, title, message, type='Info', related_url=None):
+    """In-app notification only (no email). Intentionally separate from
+    send_notification so recruitment flows never trigger email side-effects."""
+    execute("""
+        INSERT INTO Notification (employee_id, title, message, type, related_url)
+        VALUES (?, ?, ?, ?, ?)
+    """, (employee_id, title, message, type, related_url))
+
+
+def send_in_app_to_company(company_id, roles, title, message, type='Info', related_url=None,
+                           exclude_employee_id=None):
+    """Send an in-app notification to every active employee of the given company
+    whose role is in `roles`. Failures for one recipient never block the others
+    and never raise -- a notification DB error must not fail the caller."""
+    placeholders = ','.join('?' for _ in roles)
+    params = list(roles) + [company_id]
+    filter_excl = ' AND e.employee_id != ?' if exclude_employee_id else ''
+    if exclude_employee_id:
+        params.append(exclude_employee_id)
+    employees = query(
+        f"""SELECT e.employee_id FROM Employee e
+             JOIN Role r ON e.role_id = r.role_id
+             WHERE r.role_name IN ({placeholders})
+               AND e.is_active = 1
+               AND e.company_id = ?
+               {filter_excl}""",
+        params
+    )
+    for emp in employees:
+        try:
+            send_in_app_notification(emp['employee_id'], title, message, type, related_url)
+        except Exception as ex:
+            print(f"[NOTIFY] Failed for employee {emp['employee_id']}: {ex}")
+
+
 def send_notification_to_role(roles, title, message, type='Info', related_url=None):
     """Send notification to all employees with specified role(s)."""
     placeholders = ','.join('?' for _ in roles)

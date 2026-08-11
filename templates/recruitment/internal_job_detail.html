@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ posting.title }}{% endblock %}
+{% block page_title %}{{ posting.title }}{% endblock %}
+{% block content %}
+<div class="card fade-in" style="margin-bottom:20px">
+  <div style="font-size:12px;margin-bottom:12px;color:var(--text-secondary)">
+    <a href="{{ url_for('recruitment.internal_jobs') }}" style="color:var(--g600)">‹ Back to Internal Job Board</a>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:12px">
+    <div>
+      <p><strong>Department:</strong> {{ posting.department_name }} &middot; <strong>Branch:</strong> {{ posting.branch_name }}</p>
+      <p><strong>Type:</strong> {{ posting.employment_type }} &middot; <strong>Status:</strong> <span class="badge badge-green">Open</span></p>
+      {% if posting.min_salary %}<p><strong>Salary:</strong> RM{{ posting.min_salary }}{% if posting.max_salary %} – RM{{ posting.max_salary }}{% endif %}</p>{% endif %}
+      <p><strong>Audience:</strong> Internal &middot; <strong>Posted:</strong> {{ posting.created_at[:10] }}</p>
+    </div>
+    <div>
+      <form method="POST" action="{{ url_for('recruitment.internal_apply', pid=posting.posting_id) }}" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="file" name="resume" accept=".pdf,.doc,.docx" style="font-size:13px;margin-bottom:8px;max-width:260px">
+        <textarea name="cover_letter" rows="3" class="form-input" placeholder="Cover letter (optional)" style="width:100%;margin-bottom:8px"></textarea>
+        <button class="btn btn-primary" type="submit">Apply Now</button>
+      </form>
+    </div>
+  </div>
+  <h4>Description</h4><p>{{ posting.description or 'No description.' }}</p>
+  <h4>Requirements</h4><p>{{ posting.requirements or 'No requirements specified.' }}</p>
+</div>
+{% endblock %}
