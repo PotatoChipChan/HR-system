@@ -1,4 +1,5 @@
 """app/auth/routes.py – Login, logout, password reset, and login_required decorator"""
+import os
 from functools import wraps
 from flask import (Blueprint, render_template, request, redirect,
                    url_for, session, flash, current_app)
@@ -7,6 +8,12 @@ from app.database import query, execute, log_audit, get_db
 from itsdangerous import URLSafeTimedSerializer
 
 auth_bp = Blueprint('auth', __name__)
+
+
+def _dev_mode():
+    """Match create_app's dev-mode flag (FLASK_DEBUG / FLASK_ENV)."""
+    return (os.environ.get('FLASK_DEBUG', '').lower() in ('true', '1', 'yes') or
+            os.environ.get('FLASK_ENV', '').lower() == 'development')
 
 
 # ── Decorator ──────────────────────────────────────────────────────────────
@@ -166,10 +173,27 @@ def forgot_password():
                 mail.send(msg)
                 log_audit('PASSWORD_RESET', 'Auth', f'Reset link sent to {email}',
                           action_status='Success')
+                current_app.logger.info('Password reset link sent to %s', email)
+                # Development convenience: surface the link so local testing
+                # does not depend on inbox delivery.
+                if _dev_mode():
+                    print(f"[PASSWORD RESET] {email} -> {reset_url}")
             except Exception as e:
+                current_app.logger.error('Password reset email failed for %s: %s', email, e)
                 print(f"[EMAIL] Failed to send password reset: {e}")
                 log_audit('PASSWORD_RESET', 'Auth', f'Failed to send reset link to {email}',
                           action_status='Failed')
+        else:
+            # Anti-enumeration: the user-facing response stays identical, but
+            # every attempt is audited internally with a masked address so a
+            # genuinely broken flow is never invisible again. The audit status
+            # CHECK only allows Success/Failed, so the skip is described in
+            # the message (nothing failed — the lookup simply found no user).
+            local, _, domain = email.partition('@')
+            masked = (local[:1] + '*' * max(len(local) - 1, 0) + '@' + domain) if domain else '***'
+            log_audit('PASSWORD_RESET_ATTEMPT', 'Auth',
+                      f'Reset requested for unregistered email {masked} (no email sent)',
+                      action_status='Success')
 
         flash('If that email is registered, a password reset link has been sent.', 'success')
         return redirect(url_for('auth.login'))

@@ -47,11 +47,11 @@
         {% for m in managers %}
         <option value="{{ m.employee_id }}" data-branch-id="{{ m.branch_id }}"
           {%- if department and department.department_manager_id == m.employee_id %} selected{% endif %}>
-          {{ m.full_name }} — {{ m.position_name or 'No position' }} ({{ m.branch_name }})
+          {{ m.full_name }} — {{ m.position_name or 'No position' }} ({{ m.role_name }} · {{ m.branch_name }})
         </option>
         {% endfor %}
       </select>
-      <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">Assign a department manager who can submit vacancy requests for this department. Only managers from the selected branch are shown.</p>
+      <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">Assign a department manager who can submit vacancy requests for this department. Any active employee from the selected branch can be assigned — department-manager authority is separate from the system role (only staff from the selected branch are shown).</p>
     </div>
 
     <div style="margin-top:16px">

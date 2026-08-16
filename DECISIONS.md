@@ -696,3 +696,40 @@ The direct job-posting form (`/recruitment/postings/add`, Admin/HR Manager) list
 - `app/organization/routes.py` — `roles()` department-manager and empty-department queries
 - `templates/organization/role_list.html` — Department Manager Assignments, Position Catalog
 - `test_phase2_fixes.py` — B30 regression block
+
+---
+
+## DEC-022: Least-Privilege Hire Roles and Department Managers
+
+### Status
+Approved
+
+### Context
+An employee hired from application 271 was created with the Admin system role because the hire prefill carried no `role_id`, the add-employee form left every role option unselected, and the browser defaulted to the first option (Admin). Separately, the Department Management picker only offered Manager/HR Manager accounts, and the Employee edit modal hid the role selector entirely — so an Employee-role department manager could neither be created nor manually assigned, and "Project Manager" was misread as a Manager-role position.
+
+### Decision
+- **System role versus department responsibility are separate.** The five fixed system roles are unchanged. Department-manager authority is exclusively `Department.department_manager_id`; an Employee-role department manager gets dept-scoped vacancy requests on re-login via the existing session logic, without any Manager/HR/Admin access.
+- **Hire role default is Employee, never Admin**, enforced in the displayed form and server-side when `role_id` is missing or invalid. Explicit HR role choices remain honoured.
+- **Department Manager Position** is an explicit Position-catalog setting (`is_department_manager_position`, default 0 via additive migration). Title text is never inferred. For a flagged position, the hire keeps the Employee role and is automatically assigned as the posting department's manager; creation is **blocked** (clear message) when the department already has a different manager — never silently replaced.
+- **Manual administration**: the Employee edit modal shows the System Role selector to Admin/HR Manager/HR (Manager sessions stay hidden and server-blocked); the Department Manager picker lists any active employee of the department's branch with their role shown; server validation requires active + same company + same branch.
+- The guided branch-manager setup continues to assign the explicit Manager role.
+- Employee #79 was corrected in one audited atomic operation (conflict pre-checked inside the transaction): Admin → Employee with permission re-sync, then department-manager assignment for the Project Manager department (which had no manager); Position #829 flagged as a Department Manager Position.
+
+### Rationale
+Least privilege prevents accidental Admin accounts from hires; explicit catalog flags avoid title-text guessing; keeping department-manager responsibility separate from system roles lets a Project Manager hold department authority without branch-wide Manager access.
+
+### Consequences
+- `assign_role_permissions` now reactivates previously-revoked permission rows when re-granting (demotions from superset roles no longer hit the unique constraint).
+- The Department Manager picker shows more candidates; the server still enforces branch/company/active.
+- Existing positions all default to ordinary (flag 0); only explicitly flagged titles auto-assign.
+
+### Agent Rule
+`STOP AND ASK before changing`
+
+### References
+- `app/employees/routes.py` — `add_employee` (defaults, conflict pre-check, auto-assignment), `edit_employee`, `view_employee`
+- `app/organization/routes.py` — `_get_dept_manager_candidates`, `add_department`/`edit_department` validation, `add_position`/`rename_position`
+- `app/database.py` — `assign_role_permissions`
+- `init_db.py` — `migrate_position_manager_flag`
+- `templates/employees/add.html`, `view.html`, `templates/organization/department_form.html`, `add_position.html`, `role_list.html`
+- `test_phase2_fixes.py` — B42 regression block

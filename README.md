@@ -244,7 +244,9 @@ smarthr_app/
 > requests remain Admin/HR-only.
 
 > **Department managers:** Assign an employee as a department manager via
-> **Organization → Departments → edit**. That user's `is_dept_manager` flag is set on login
+> **Organization → Departments → edit** — any active employee of the department's branch
+> can be assigned (their system role is unchanged; department-manager responsibility is
+> separate from role-based access). That user's `is_dept_manager` flag is set on login
 > and they get dept-scoped vacancy request management. Demo assignments are seeded in
 > `init_db.py`.
 
@@ -254,6 +256,10 @@ smarthr_app/
 > request/postings pick titles from the catalog (scoped to the chosen/owned department);
 > custom titles are allowed on vacancy requests and flagged `is_custom=1` for HR review,
 > then optionally promoted into the catalog at approval time.
+> Positions can be marked **Department Manager Position** (explicit checkbox — no title
+> inference): hires for that title default to the **Employee** system role and are
+> automatically assigned as the posting department's manager. If the department already
+> has a different manager, the hire is blocked and HR must reassign the manager first.
 >
 > **Guided setup:** HR can explicitly continue from a new Branch to its Department, catalog
 > Position, a prefilled Manager employee form, and a prefilled Job Posting form. The normal

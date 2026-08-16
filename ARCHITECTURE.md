@@ -403,10 +403,15 @@ All authentication state is stored in Flask's server-side session (cookie-signed
 ### Department Manager Scoping (`app/auth/routes.py:117-131`)
 
 The login flow queries `Department.department_manager_id` to determine if the
-user manages a department. The "Branch Manager" department is explicitly excluded
+user manages a department — regardless of the user's system role (an
+Employee-role department manager is scoped exactly like a Manager-role one).
+The "Branch Manager" department is explicitly excluded
 (their manager is treated as a plain `Manager` with branch-wide scope, not
 department-scoped). When `is_dept_manager=True`, `managed_dept_id` is set and
-used for vacancy request visibility.
+used for vacancy request visibility. Department-manager responsibility is
+assigned manually via the Department Management picker (any active employee of
+the branch) or automatically when hiring for a flagged Department Manager
+Position.
 
 ### In-Memory State
 
@@ -743,8 +748,8 @@ Captures: `employee_id` (from session), `ip_address`, `user_agent`, timestamp (a
 
 - **Roles & Permissions page** (`/organization/roles`): System Roles catalog, Department Manager Assignments, and the Position Catalog.
 - **Department Manager Assignments** lists every department (LEFT JOIN on the manager) — departments without an assigned manager render an `Unassigned` badge instead of being hidden.
-- **Position Catalog** shows catalog titles per department; departments with zero active positions are named in a "Departments without catalog positions" hint that directs users to the "+ New Position Title" form.
-- **Department form**: the branch select client-side filters the Department Manager dropdown to that branch's managers; POST rejects cross-branch manager assignments.
+- **Position Catalog** shows catalog titles per department; departments with zero active positions are named in a "Departments without catalog positions" hint that directs users to the "+ New Position Title" form. Positions can be flagged as **Department Manager Position** (`is_department_manager_position`) — hires for flagged titles default to the Employee role and auto-assign as the posting department's manager (never a silent replacement; conflict blocks creation).
+- **Department form**: the branch select client-side filters the Department Manager dropdown to that branch's employees (any active employee is assignable, regardless of system role — department-manager authority is separate from role access); POST rejects candidates that are inactive, cross-company, or cross-branch.
 
 ### Invoice/Claims (`app/invoice/routes.py`)
 

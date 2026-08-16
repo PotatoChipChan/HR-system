@@ -979,6 +979,28 @@ def migrate_job_posting_archive():
     print("[OK] Job posting archive migration completed.")
 
 
+def migrate_position_manager_flag():
+    """Add the Department Manager Position flag to the Position catalog.
+
+    Additive-only migration (ALTER ADD COLUMN): no table rebuild and no
+    backup required. Existing positions default to 0 (ordinary positions),
+    so no existing posting ever auto-assigns a department manager.
+    Idempotent - safe to re-run.
+    """
+    con = get_connection()
+    cols = [r[1] for r in con.execute("PRAGMA table_info(Position)")]
+    if 'is_department_manager_position' in cols:
+        con.close()
+        print("[OK] Position manager-flag migration already applied.")
+        return
+
+    print("[MIGRATION] Adding is_department_manager_position to Position ...")
+    con.execute("ALTER TABLE Position ADD COLUMN is_department_manager_position INTEGER NOT NULL DEFAULT 0")
+    con.commit()
+    con.close()
+    print("[OK] Position manager-flag migration completed.")
+
+
 def migrate_ai_screening():
     """Add AI-screening fields to Job_Application:
 
@@ -1247,6 +1269,7 @@ def init_db():
     migrate_scorecard_recommendation()
     migrate_offer_lifecycle()
     migrate_job_posting_archive()
+    migrate_position_manager_flag()
     
     con = get_connection()
     cur = con.cursor()

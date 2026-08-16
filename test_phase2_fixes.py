@@ -4550,31 +4550,97 @@ if _active:
     init_db_mod.DB_PATH = b36_db
     try:
         import sqlite3 as b36_sqlite
-        # Pre-migration state: force one posting to Filled so the migration's
-        # backfill has something to archive.
+        # Build a controlled pre-migration state: Job_Posting with the
+        # vacancy-openings-era CHECK (Partially Filled but no Archived), one
+        # Filled and one Open posting. Independent of the live DB's migration
+        # state so the rebuild/backup behaviour is always exercised.
+        b36_old_jp_ddl = """
+        CREATE TABLE Job_Posting (
+            posting_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            title           TEXT NOT NULL,
+            position_id     INTEGER REFERENCES Position(position_id),
+            department_id   INTEGER,
+            branch_id       INTEGER,
+            employment_type TEXT CHECK(employment_type IN ('Full-Time','Part-Time','Contract')),
+            min_salary      REAL,
+            max_salary      REAL,
+            description     TEXT,
+            requirements    TEXT,
+            status          TEXT DEFAULT 'Open' CHECK(status IN ('Open','Partially Filled','Closed','Filled')),
+            target_audience TEXT NOT NULL DEFAULT 'Both' CHECK(target_audience IN ('Internal','External','Both')),
+            posted_by       INTEGER,
+            created_at      TEXT DEFAULT (datetime('now')),
+            closed_at       TEXT,
+            approved_openings INTEGER NOT NULL DEFAULT 1,
+            reserved_openings INTEGER NOT NULL DEFAULT 0,
+            filled_openings   INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (department_id) REFERENCES Department(department_id),
+            FOREIGN KEY (branch_id)     REFERENCES Branch(branch_id),
+            FOREIGN KEY (posted_by)     REFERENCES Employee(employee_id)
+        )
+        """
         b36_con = b36_sqlite.connect(b36_db)
-        b36_con.execute("UPDATE Job_Posting SET status='Filled' "
-                        "WHERE posting_id=(SELECT posting_id FROM Job_Posting LIMIT 1)")
+        b36_con.row_factory = b36_sqlite.Row
+        b36_con.execute("PRAGMA foreign_keys = OFF")
+        for _b36_child in ('Opening_Reservation', 'Offer_Approval', 'Email_Delivery_Log',
+                           'Interview_Scorecard', 'Interview_Reschedule',
+                           'Candidate_Recommendation'):
+            if b36_con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                               (_b36_child,)).fetchone():
+                b36_con.execute("DELETE FROM " + _b36_child)
+        b36_con.execute("DELETE FROM Interview")
+        b36_con.execute("DELETE FROM Contract")
+        b36_con.execute("DELETE FROM Job_Application")
+        b36_con.execute("DELETE FROM Vacancy_Request WHERE posting_id IS NOT NULL")
+        b36_con.execute("DROP TABLE Job_Posting")
+        b36_con.execute(b36_old_jp_ddl)
+        b36_con.execute("PRAGMA foreign_keys = ON")
+        emp36 = b36_con.execute(
+            "SELECT employee_id, branch_id, department_id FROM Employee ORDER BY employee_id LIMIT 1"
+        ).fetchone()
+        dept36 = b36_con.execute(
+            "SELECT department_id, branch_id FROM Department WHERE department_id=?",
+            (emp36['department_id'],)).fetchone() or emp36
+        b36_con.execute(
+            "INSERT INTO Job_Posting (posting_id, title, department_id, branch_id, status, created_at, closed_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (901, 'B36 Filled Role', dept36['department_id'], emp36['branch_id'], 'Filled',
+             '2026-01-01 09:00:00', '2026-01-10 09:00:00'))
+        b36_con.execute(
+            "INSERT INTO Job_Posting (posting_id, title, department_id, branch_id, status, created_at, closed_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (902, 'B36 Open Role', dept36['department_id'], emp36['branch_id'], 'Open',
+             '2026-01-02 09:00:00', None))
         b36_con.commit()
         b36_con.close()
 
+        check(len(glob.glob(os.path.join(b36_tmp_dir, 'backups', '*'))) == 0,
+              'B36: no backups exist before the migration')
+
         init_db_mod.migrate_job_posting_archive()
-        b36_baks = glob.glob(os.path.join(b36_tmp_dir, 'backups', '*'))
-        check(len(b36_baks) >= 1, 'B36: migration created a timestamped backup')
 
         with app.test_client() as client:
-            client.post('/login', data={'email': 'admin@smarthr.my', 'password': 'Admin@123'},
-                        follow_redirects=True)
-
+            client.get('/login')
             b36_sql = dbq("SELECT sql FROM sqlite_master WHERE type='table' AND name='Job_Posting'", one=True)
             check(b36_sql is not None and 'Archived' in (b36_sql['sql'] or ''),
                   'B36: Archived status added to Job_Posting CHECK by migration')
-            b36_archived = dbq("SELECT COUNT(*) as c FROM Job_Posting WHERE status='Archived'", one=True)['c']
-            check(b36_archived >= 1, 'B36: previously Filled postings backfilled to Archived')
+            b36_archived = dbq("""SELECT status, closed_at FROM Job_Posting
+                                  WHERE posting_id=901""", one=True)
+            check(b36_archived is not None and b36_archived['status'] == 'Archived'
+                  and b36_archived['closed_at'] == '2026-01-10 09:00:00',
+                  'B36: previously Filled postings backfilled to Archived with closed_at kept')
+            b36_still_open = dbq("SELECT status FROM Job_Posting WHERE posting_id=902", one=True)
+            check(b36_still_open['status'] == 'Open',
+                  'B36: non-Filled postings are untouched by the backfill')
+            b36_baks = glob.glob(os.path.join(b36_tmp_dir, 'backups', '*'))
+            check(len(b36_baks) == 1, 'B36: migration created exactly one timestamped backup')
             init_db_mod.migrate_job_posting_archive()
             b36_sql2 = dbq("SELECT sql FROM sqlite_master WHERE type='table' AND name='Job_Posting'", one=True)
             check(b36_sql2 is not None and 'Archived' in (b36_sql2['sql'] or ''),
                   'B36: archive migration is idempotent')
+
+            client.post('/login', data={'email': 'admin@smarthr.my', 'password': 'Admin@123'},
+                        follow_redirects=True)
 
             b36_roles = {r['role_name']: r['role_id']
                          for r in dbq("SELECT role_id, role_name FROM Role")}
@@ -4820,7 +4886,7 @@ if _active:
               'B39: employee validation preserves the selected guided-flow submit action')
 
         response = client.post('/employees/add', data={
-            'full_name': 'B39 Guided Manager', 'ic_number': '', 'passport_number': '',
+            'full_name': 'Guided Manager', 'ic_number': '', 'passport_number': '',
             'contact_no': '', 'address': '', 'date_of_birth': '', 'gender': '',
             'emergency_contact_name': '', 'emergency_contact_no': '',
             'email': 'b39-guided-manager@example.test', 'personal_email': '',
@@ -4853,6 +4919,7 @@ print('=' * 60)
 
 if _active:
     with app.test_client() as client:
+        client.get('/login')
         manager = dbq("SELECT employee_id, branch_id FROM Employee WHERE email='weiliang@smarthr.my'", one=True)
         manager_day = dbq("""SELECT date(a.check_in) as day
                              FROM Attendance a JOIN Employee e ON a.employee_id=e.employee_id
@@ -4880,6 +4947,409 @@ if _active:
         check(f'<div class="metric-val green-val">{expected_manual}</div>' in page,
               'B40: HR attendance summary honours the selected entry method')
         client.get('/logout')
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# B41 — Password reset flow (forgot-password + reset-password)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+print('=' * 60)
+_focus_block('41')
+print('B41 — Password reset flow')
+print('=' * 60)
+
+if _active:
+    b41_tmp_dir = tempfile.mkdtemp(prefix='smarthr_b41_')
+    b41_db = os.path.join(b41_tmp_dir, 'smarthr_b41.db')
+    shutil.copy2(_suite_db, b41_db)
+    b41_real_db = app_db_mod.DB_PATH
+    app_db_mod.DB_PATH = b41_db
+    init_db_mod.DB_PATH = b41_db
+    import re as _re
+    import app as _app_mod
+    b41_sent = []
+    b41_orig_send = _app_mod.mail.send
+    _app_mod.mail.send = lambda msg: b41_sent.append(msg)
+    try:
+        with app.test_client() as client:
+            page = client.get('/forgot-password').data.decode('utf-8', errors='replace')
+            check('Forgot password?' in page and 'name="email"' in page,
+                  'B41: forgot-password page renders the request form')
+
+            resp = client.post('/forgot-password',
+                               data={'email': 'admin@smarthr.my'},
+                               follow_redirects=True)
+            check(resp.status_code == 200 and b'If that email is registered' in resp.data
+                  and len(b41_sent) == 1 and b41_sent[0].recipients == ['admin@smarthr.my'],
+                  'B41: registered email triggers a password reset email')
+            audit_sent = dbq("""SELECT action_status FROM AuditLog
+                                WHERE action='PASSWORD_RESET' AND action_status='Success'
+                                ORDER BY rowid DESC LIMIT 1""", one=True)
+            check(audit_sent is not None, 'B41: successful reset send is audited')
+
+            sent_before = len(b41_sent)
+            resp = client.post('/forgot-password',
+                               data={'email': 'nobody@nowhere.test'},
+                               follow_redirects=True)
+            check(resp.status_code == 200 and b'If that email is registered' in resp.data
+                  and len(b41_sent) == sent_before,
+                  'B41: unregistered email sends nothing (anti-enumeration flash kept)')
+            audit_skip = dbq("""SELECT description, action_status FROM AuditLog
+                                WHERE action='PASSWORD_RESET_ATTEMPT'
+                                ORDER BY rowid DESC LIMIT 1""", one=True)
+            check(audit_skip is not None and audit_skip['action_status'] == 'Success'
+                  and 'n*****@nowhere.test' in (audit_skip['description'] or '')
+                  and 'nobody@nowhere.test' not in (audit_skip['description'] or ''),
+                  'B41: unregistered attempts are audited with a masked email')
+
+            body = b41_sent[0].body
+            m = _re.search(r'https?://\S+/reset-password/([^\s]+)', body)
+            token = m.group(1) if m else None
+            check(token is not None, 'B41: reset email carries the reset URL')
+
+            page = client.get(f'/reset-password/{token}').data.decode('utf-8', errors='replace')
+            check('Reset Password' in page and 'name="password"' in page,
+                  'B41: valid token renders the reset form')
+
+            resp = client.post(f'/reset-password/{token}',
+                               data={'password': 'short', 'confirm_password': 'short'})
+            check(b'at least 8 characters' in resp.data,
+                  'B41: short new password rejected')
+
+            resp = client.post(f'/reset-password/{token}',
+                               data={'password': 'NewPass@123', 'confirm_password': 'Different@1'})
+            check(b'do not match' in resp.data,
+                  'B41: mismatched confirmation rejected')
+
+            resp = client.post(f'/reset-password/{token}',
+                               data={'password': 'NewPass@123', 'confirm_password': 'NewPass@123'},
+                               follow_redirects=True)
+            check(resp.status_code == 200 and b'reset successfully' in resp.data,
+                  'B41: valid reset completes with the success message')
+            audit_reset = dbq("""SELECT action_status FROM AuditLog
+                                 WHERE action='PASSWORD_RESET' AND description LIKE '%completed%'
+                                 ORDER BY rowid DESC LIMIT 1""", one=True)
+            check(audit_reset is not None, 'B41: completed reset is audited')
+
+            client.post('/login', data={'email': 'admin@smarthr.my', 'password': 'NewPass@123'},
+                        follow_redirects=True)
+            page = client.get('/').data.decode('utf-8', errors='replace')
+            check('Dashboard' in page, 'B41: login works with the new password')
+            client.get('/logout')
+
+            resp = client.get('/reset-password/badtoken123', follow_redirects=True)
+            check(b'invalid or has expired' in resp.data,
+                  'B41: tampered token rejected')
+    finally:
+        _app_mod.mail.send = b41_orig_send
+        app_db_mod.DB_PATH = b41_real_db
+        init_db_mod.DB_PATH = b41_real_db
+        shutil.rmtree(b41_tmp_dir, ignore_errors=True)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# B42 — Least-privilege hire role & department-manager assignment
+# ═══════════════════════════════════════════════════════════════════════════════
+
+print('=' * 60)
+_focus_block('42')
+print('B42 — Least-privilege hire role & department-manager assignment')
+print('=' * 60)
+
+if _active:
+    b42_tmp_dir = tempfile.mkdtemp(prefix='smarthr_b42_')
+    b42_db = os.path.join(b42_tmp_dir, 'smarthr_b42.db')
+    shutil.copy2(_suite_db, b42_db)
+    b42_real_db = app_db_mod.DB_PATH
+    app_db_mod.DB_PATH = b42_db
+    init_db_mod.DB_PATH = b42_db
+    import json as _json
+    import sqlite3 as _sqlite3
+    import app as _app_mod
+    b42_orig_send = _app_mod.mail.send
+    _app_mod.mail.send = lambda msg: None
+    try:
+        # ── Migration: old Position schema gains the flag, defaulting to 0 ──
+        b42m_db = os.path.join(b42_tmp_dir, 'mig.db')
+        b42m_con = sqlite3.connect(b42m_db)
+        b42m_con.execute("""CREATE TABLE Position (
+            position_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            position_name TEXT NOT NULL,
+            department_id INTEGER NOT NULL,
+            is_active     INTEGER DEFAULT 1,
+            created_at    TEXT DEFAULT (datetime('now'))
+        )""")
+        b42m_con.execute("INSERT INTO Position (position_name, department_id) VALUES ('Old Role', 1)")
+        b42m_con.commit()
+        b42m_con.close()
+        init_db_mod.DB_PATH = b42m_db
+        init_db_mod.migrate_position_manager_flag()
+        b42m_con = sqlite3.connect(b42m_db)
+        b42m_cols = [r[1] for r in b42m_con.execute("PRAGMA table_info(Position)")]
+        b42m_flag = b42m_con.execute("SELECT is_department_manager_position FROM Position WHERE position_name='Old Role'").fetchone()[0]
+        b42m_con.close()
+        check('is_department_manager_position' in b42m_cols and b42m_flag == 0,
+              'B42: migration adds the flag with a safe false default for existing positions')
+        init_db_mod.migrate_position_manager_flag()
+        check(True, 'B42: manager-flag migration is idempotent')
+        init_db_mod.DB_PATH = b42_db
+
+        with app.test_client() as client:
+            client.get('/login')
+            client.post('/login', data={'email': 'hr@smarthr.my', 'password': 'Hr@123'},
+                        follow_redirects=True)
+
+            b42_employee_role = dbq("SELECT role_id FROM Role WHERE role_name='Employee'", one=True)['role_id']
+            b42_branch = dbq("SELECT branch_id FROM Branch WHERE company_id=1 ORDER BY branch_id LIMIT 1", one=True)['branch_id']
+
+            # Department A (no manager) + a flagged position, via the real routes.
+            client.post('/organization/department/add', data={
+                'branch_id': str(b42_branch), 'department_name': 'B42 Dept A',
+                'department_manager_id': '', 'return_to': '',
+            }, follow_redirects=False)
+            b42_dept_a = dbq("SELECT department_id FROM Department WHERE department_name='B42 Dept A'", one=True)['department_id']
+            check(b42_dept_a is not None, 'B42: fixture department created')
+
+            client.post('/organization/roles/positions/add', data={
+                'branch_id': str(b42_branch), 'department_id': str(b42_dept_a),
+                'position_name': 'B42 Dept Lead', 'is_department_manager_position': '1',
+            }, follow_redirects=False)
+            b42_pos_lead = dbq("SELECT position_id FROM Position WHERE position_name='B42 Dept Lead'", one=True)['position_id']
+            b42_pos_lead_flag = dbq("SELECT is_department_manager_position FROM Position WHERE position_id=?", (b42_pos_lead,), one=True)['is_department_manager_position']
+            check(b42_pos_lead_flag == 1, 'B42: add-position persists the Department Manager Position flag')
+
+            client.post('/organization/roles/positions/add', data={
+                'branch_id': str(b42_branch), 'department_id': str(b42_dept_a),
+                'position_name': 'B42 Ordinary', 'is_department_manager_position': '',
+            }, follow_redirects=False)
+            b42_pos_ordinary = dbq("SELECT position_id FROM Position WHERE position_name='B42 Ordinary'", one=True)['position_id']
+            b42_pos_ordinary_flag = dbq("SELECT is_department_manager_position FROM Position WHERE position_id=?", (b42_pos_ordinary,), one=True)['is_department_manager_position']
+            check(b42_pos_ordinary_flag == 0, 'B42: unflagged position stays ordinary')
+
+            def b42_prefill(name, email, pos_id, dept_id):
+                return _json.dumps({
+                    'full_name': name, 'email': email, 'personal_email': email,
+                    'ic_number': '', 'date_of_birth': '', 'gender': '', 'contact_no': '',
+                    'address': '', 'emergency_contact_name': '', 'emergency_contact_no': '',
+                    'position_id': pos_id, 'position': 'B42 Role',
+                    'department_id': dept_id, 'branch_id': b42_branch,
+                    'employment_type': 'Full-Time', 'base_salary': '5000',
+                    'hire_date': '2026-01-01', 'work_start_time': '09:00',
+                    'work_end_time': '18:00', 'contract_id': '',
+                })
+
+            def b42_hire_post(name, email, pos_id, dept_id, extra=None):
+                data = {
+                    'from_hire': '1', 'full_name': name, 'ic_number': '', 'passport_number': '',
+                    'contact_no': '', 'address': '', 'date_of_birth': '', 'gender': '',
+                    'emergency_contact_name': '', 'emergency_contact_no': '',
+                    'email': email, 'personal_email': email,
+                    'branch_id': str(b42_branch), 'department_id': str(dept_id),
+                    'position_id': str(pos_id), 'position': 'B42 Role',
+                    'hire_date': '2026-01-01', 'work_start_time': '09:00',
+                    'work_end_time': '18:00', 'employment_type': 'Full-Time',
+                    'employment_status': 'Active', 'base_salary': '5000',
+                    'password': '', 'confirm_password': '', 'id_document_path': '',
+                }
+                if extra:
+                    data.update(extra)
+                return client.post('/employees/add', data=data, follow_redirects=True)
+
+            # GET: hire prefill preselects Employee (never Admin) and shows the banner.
+            with client.session_transaction() as sess:
+                sess['hire_prefill'] = b42_prefill('Hire One', 'b42.one@example.test',
+                                                   b42_pos_lead, b42_dept_a)
+            page = client.get('/employees/add?from_hire=1').data.decode('utf-8', errors='replace')
+            check(f'<option value="{b42_employee_role}" selected>Employee</option>' in page
+                  and '<option value="1" selected>Admin</option>' not in page,
+                  'B42: hire form preselects Employee, never Admin')
+            check('Department Manager Position' in page and 'automatically assigned as department manager of B42 Dept A' in page,
+                  'B42: hire form explains the automatic department-manager assignment')
+
+            # POST flagged position without role_id -> Employee + auto department manager.
+            resp = b42_hire_post('Hire One', 'b42.one@example.test', b42_pos_lead, b42_dept_a)
+            b42_emp1 = dbq("SELECT employee_id, role_id FROM Employee WHERE email='b42.one@example.test'", one=True)
+            b42_dept_a_mgr = dbq("SELECT department_manager_id FROM Department WHERE department_id=?", (b42_dept_a,), one=True)['department_manager_id']
+            check(resp.status_code == 200 and b42_emp1 is not None
+                  and b42_emp1['role_id'] == b42_employee_role
+                  and b42_dept_a_mgr == b42_emp1['employee_id'],
+                  'B42: flagged-position hire gets Employee role and is auto-assigned department manager')
+            b42_audit_auto = dbq("""SELECT action_status FROM AuditLog
+                                    WHERE action='DEPT_MANAGER_AUTO_ASSIGN'
+                                    ORDER BY rowid DESC LIMIT 1""", one=True)
+            check(b42_audit_auto is not None, 'B42: auto department-manager assignment is audited')
+
+            # Second hire for the same department -> blocked by the existing manager.
+            with client.session_transaction() as sess:
+                sess['hire_prefill'] = b42_prefill('Hire Two', 'b42.two@example.test',
+                                                   b42_pos_lead, b42_dept_a)
+            resp = b42_hire_post('Hire Two', 'b42.two@example.test', b42_pos_lead, b42_dept_a)
+            b42_emp2 = dbq("SELECT employee_id FROM Employee WHERE email='b42.two@example.test'", one=True)
+            b42_dept_a_mgr2 = dbq("SELECT department_manager_id FROM Department WHERE department_id=?", (b42_dept_a,), one=True)['department_manager_id']
+            check(b42_emp2 is None and b42_dept_a_mgr2 == b42_emp1['employee_id']
+                  and b'Reassign the department manager first' in resp.data,
+                  'B42: existing-manager conflict blocks creation and never replaces the manager')
+
+            # Ordinary position: default Employee; explicit role honored; invalid falls back.
+            with client.session_transaction() as sess:
+                sess['hire_prefill'] = b42_prefill('Ord One', 'b42.ord1@example.test',
+                                                   b42_pos_ordinary, b42_dept_a)
+            b42_hire_post('Ord One', 'b42.ord1@example.test', b42_pos_ordinary, b42_dept_a)
+            b42_ord1 = dbq("SELECT role_id FROM Employee WHERE email='b42.ord1@example.test'", one=True)
+            check(b42_ord1 is not None and b42_ord1['role_id'] == b42_employee_role,
+                  'B42: ordinary-position hire defaults to Employee')
+
+            with client.session_transaction() as sess:
+                sess['hire_prefill'] = b42_prefill('Ord Two', 'b42.ord2@example.test',
+                                                   b42_pos_ordinary, b42_dept_a)
+            b42_hire_post('Ord Two', 'b42.ord2@example.test', b42_pos_ordinary, b42_dept_a,
+                          extra={'role_id': '2'})
+            b42_ord2 = dbq("SELECT role_id FROM Employee WHERE email='b42.ord2@example.test'", one=True)
+            check(b42_ord2 is not None and b42_ord2['role_id'] == 2,
+                  'B42: HR explicit role choice is honored for ordinary positions')
+
+            with client.session_transaction() as sess:
+                sess['hire_prefill'] = b42_prefill('Ord Three', 'b42.ord3@example.test',
+                                                   b42_pos_ordinary, b42_dept_a)
+            b42_hire_post('Ord Three', 'b42.ord3@example.test', b42_pos_ordinary, b42_dept_a,
+                          extra={'role_id': '999'})
+            b42_ord3 = dbq("SELECT role_id FROM Employee WHERE email='b42.ord3@example.test'", one=True)
+            check(b42_ord3 is not None and b42_ord3['role_id'] == b42_employee_role,
+                  'B42: invalid role_id falls back to Employee (never Admin)')
+
+            # Department picker lists any active employee (role shown), and an
+            # Employee-role employee can be assigned; cross-branch is rejected.
+            page = client.get('/organization/department/add').data.decode('utf-8', errors='replace')
+            check('Elizabeth Lopez' in page and '(Employee' in page,
+                  'B42: department picker lists Employee-role employees with their role')
+            resp = client.post('/organization/department/add', data={
+                'branch_id': str(b42_branch), 'department_name': 'B42 Dept B',
+                'department_manager_id': '4',
+            }, follow_redirects=False)
+            b42_dept_b = dbq("SELECT department_id, department_manager_id FROM Department WHERE department_name='B42 Dept B'", one=True)
+            check(resp.status_code == 302 and b42_dept_b is not None
+                  and b42_dept_b['department_manager_id'] == 4,
+                  'B42: Employee-role employee assignable as department manager')
+            b42_other_branch = dbq("SELECT branch_id FROM Branch WHERE company_id=1 AND branch_id!=? ORDER BY branch_id LIMIT 1",
+                                   (b42_branch,), one=True)['branch_id']
+            resp = client.post('/organization/department/add', data={
+                'branch_id': str(b42_other_branch), 'department_name': 'B42 Dept C',
+                'department_manager_id': '4',
+            }, follow_redirects=True)
+            b42_dept_c = dbq("SELECT department_id FROM Department WHERE department_name='B42 Dept C'", one=True)
+            check(b42_dept_c is None
+                  and b'active employee of this branch in the same company' in resp.data,
+                  'B42: cross-branch department-manager assignment rejected')
+
+            # Edit modal: Admin/HR sees the System Role select; role change re-syncs
+            # permissions and audits; Manager sessions stay blocked server-side.
+            page = client.get(f'/employees/{b42_emp1["employee_id"]}').data.decode('utf-8', errors='replace')
+            check('System Role' in page and 'name="role_id"' in page,
+                  'B42: employee edit exposes the System Role selector to HR')
+            resp = client.post(f'/employees/{b42_emp1["employee_id"]}/edit', data={
+                'full_name': 'Hire One', 'contact_no': '', 'address': '',
+                'date_of_birth': '', 'gender': 'Male', 'emergency_contact_name': '',
+                'emergency_contact_no': '', 'position': 'B42 Dept Lead',
+                'base_salary': '5000', 'employment_type': 'Full-Time',
+                'employment_status': 'Active', 'work_start_time': '09:00',
+                'work_end_time': '18:00', 'branch_id': str(b42_branch),
+                'department_id': str(b42_dept_a), 'role_id': '3',
+            }, follow_redirects=True)
+            b42_emp1_after = dbq("SELECT role_id FROM Employee WHERE employee_id=?", (b42_emp1['employee_id'],), one=True)
+            b42_emp1_perms = dbq("SELECT COUNT(*) c FROM Employee_Permission WHERE employee_id=? AND is_active=1",
+                                 (b42_emp1['employee_id'],), one=True)['c']
+            b42_promote = dbq("""SELECT action_status FROM AuditLog
+                                 WHERE action='PROMOTE_DEMOTE'
+                                 ORDER BY rowid DESC LIMIT 1""", one=True)
+            check(b42_emp1_after['role_id'] == 3 and b42_emp1_perms == 12 and b42_promote is not None,
+                  'B42: role change via edit re-syncs permissions and is audited')
+            client.get('/logout')
+
+            client.post('/login', data={'email': 'weiliang@smarthr.my', 'password': 'Manager@123'},
+                        follow_redirects=True)
+            resp = client.post(f'/employees/{b42_emp1["employee_id"]}/edit', data={
+                'full_name': 'Hire One', 'contact_no': '', 'address': '',
+                'date_of_birth': '', 'gender': 'Male', 'emergency_contact_name': '',
+                'emergency_contact_no': '', 'position': 'B42 Dept Lead',
+                'base_salary': '5000', 'employment_type': 'Full-Time',
+                'employment_status': 'Active', 'work_start_time': '09:00',
+                'work_end_time': '18:00', 'branch_id': str(b42_branch),
+                'department_id': str(b42_dept_a), 'role_id': str(b42_employee_role),
+            }, follow_redirects=True)
+            b42_emp1_still = dbq("SELECT role_id FROM Employee WHERE employee_id=?", (b42_emp1['employee_id'],), one=True)
+            check(b42_emp1_still['role_id'] == 3 and b'Managers cannot change' in resp.data,
+                  'B42: Manager session cannot change an employee role')
+            client.get('/logout')
+
+            # Flagged-position hire must FORCE the Employee role server-side
+            # even when the form submits Admin/Manager.
+            client.post('/login', data={'email': 'hr@smarthr.my', 'password': 'Hr@123'},
+                        follow_redirects=True)
+            client.post('/organization/department/add', data={
+                'branch_id': str(b42_branch), 'department_name': 'B42 Dept D',
+                'department_manager_id': '', 'return_to': '',
+            }, follow_redirects=False)
+            b42_dept_d = dbq("SELECT department_id FROM Department WHERE department_name='B42 Dept D'", one=True)['department_id']
+            client.post('/organization/roles/positions/add', data={
+                'branch_id': str(b42_branch), 'department_id': str(b42_dept_d),
+                'position_name': 'B42 Escalation Lead', 'is_department_manager_position': '1',
+            }, follow_redirects=False)
+            b42_pos_esc = dbq("SELECT position_id FROM Position WHERE position_name='B42 Escalation Lead'", one=True)['position_id']
+            with client.session_transaction() as sess:
+                sess['hire_prefill'] = b42_prefill('Escalation One', 'b42.esc1@example.test',
+                                                   b42_pos_esc, b42_dept_d)
+            resp = b42_hire_post('Escalation One', 'b42.esc1@example.test', b42_pos_esc, b42_dept_d,
+                                 extra={'role_id': '1'})
+            b42_esc1 = dbq("SELECT employee_id, role_id FROM Employee WHERE email='b42.esc1@example.test'", one=True)
+            b42_esc_perms = dbq("SELECT COUNT(*) c FROM Employee_Permission WHERE employee_id=? AND is_active=1",
+                                (b42_esc1['employee_id'],), one=True)['c'] if b42_esc1 else -1
+            b42_dept_d_mgr = dbq("SELECT department_manager_id FROM Department WHERE department_id=?", (b42_dept_d,), one=True)['department_manager_id']
+            check(resp.status_code == 200 and b42_esc1 is not None
+                  and b42_esc1['role_id'] == b42_employee_role and b42_esc_perms == 6
+                  and b42_dept_d_mgr == b42_esc1['employee_id'],
+                  'B42: flagged hire with submitted Admin role is forced to Employee (never Admin)')
+
+            # Zero-row conditional-update path: a trigger steals the department
+            # manager slot between the pre-check and the conditional UPDATE, so
+            # the UPDATE affects zero rows and the whole hire transaction must
+            # roll back (no employee, no audit, manager slot unchanged).
+            client.post('/organization/department/add', data={
+                'branch_id': str(b42_branch), 'department_name': 'B42 Dept E',
+                'department_manager_id': '', 'return_to': '',
+            }, follow_redirects=False)
+            b42_dept_e = dbq("SELECT department_id FROM Department WHERE department_name='B42 Dept E'", one=True)['department_id']
+            client.post('/organization/roles/positions/add', data={
+                'branch_id': str(b42_branch), 'department_id': str(b42_dept_e),
+                'position_name': 'B42 Raced Lead', 'is_department_manager_position': '1',
+            }, follow_redirects=False)
+            b42_pos_race = dbq("SELECT position_id FROM Position WHERE position_name='B42 Raced Lead'", one=True)['position_id']
+            b42_con = _sqlite3.connect(b42_db)
+            b42_con.execute(f"""CREATE TRIGGER b42_steal_mgr AFTER INSERT ON Employee
+                               BEGIN
+                                   UPDATE Department SET department_manager_id=1
+                                   WHERE department_id={int(b42_dept_e)};
+                               END""")
+            b42_con.commit()
+            b42_con.close()
+            b42_audit_before = dbq("""SELECT COUNT(*) c FROM AuditLog
+                                      WHERE action='DEPT_MANAGER_AUTO_ASSIGN'""", one=True)['c']
+            with client.session_transaction() as sess:
+                sess['hire_prefill'] = b42_prefill('Raced One', 'b42.race1@example.test',
+                                                   b42_pos_race, b42_dept_e)
+            resp = b42_hire_post('Raced One', 'b42.race1@example.test', b42_pos_race, b42_dept_e,
+                                 extra={'role_id': '2'})
+            b42_race1 = dbq("SELECT employee_id FROM Employee WHERE email='b42.race1@example.test'", one=True)
+            b42_audit_after = dbq("""SELECT COUNT(*) c FROM AuditLog
+                                     WHERE action='DEPT_MANAGER_AUTO_ASSIGN'""", one=True)['c']
+            b42_dept_e_mgr = dbq("SELECT department_manager_id FROM Department WHERE department_id=?", (b42_dept_e,), one=True)['department_manager_id']
+            check(b42_race1 is None and b42_audit_after == b42_audit_before
+                  and b42_dept_e_mgr is None
+                  and b'Reassign the department manager first' in resp.data,
+                  'B42: zero-row department assignment rolls back the whole hire transaction')
+            client.get('/logout')
+    finally:
+        _app_mod.mail.send = b42_orig_send
+        app_db_mod.DB_PATH = b42_real_db
+        init_db_mod.DB_PATH = b42_real_db
+        shutil.rmtree(b42_tmp_dir, ignore_errors=True)
 
 # Summary
 # ═══════════════════════════════════════════════════════════════════════════════

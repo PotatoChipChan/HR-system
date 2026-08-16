@@ -241,13 +241,20 @@ def assign_role_permissions(employee_id, role_id, current_user_id=None):
         WHERE employee_id = ? AND is_active = 1
     """, (employee_id,))
     
-    # Grant all permissions for the new role
+    # Grant all permissions for the new role. Previous grants may already
+    # exist as revoked rows (e.g. when demoting from a superset role), so
+    # reactivate those instead of duplicating the (employee, permission) pair.
     for perm_id in role_perm_ids:
         execute("""
-            INSERT INTO Employee_Permission
+            INSERT OR IGNORE INTO Employee_Permission
             (employee_id, permission_id, is_active, granted_by, reason)
             VALUES (?, ?, 1, ?, 'role_assignment')
         """, (employee_id, perm_id, current_user_id))
+        execute("""
+            UPDATE Employee_Permission
+            SET is_active = 1, revoked_at = NULL
+            WHERE employee_id = ? AND permission_id = ? AND is_active = 0
+        """, (employee_id, perm_id))
     
     db.commit()
 

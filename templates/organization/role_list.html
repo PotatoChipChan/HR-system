@@ -74,7 +74,7 @@
 <div class="card fade-in section-gap">
   <div class="sec-title">
     <span>Department Manager Assignments</span>
-    <span style="font-size:12px;color:var(--text-secondary);font-weight:400">Managers are assigned in <a href="{{ url_for('organization.departments') }}">Department Management</a> — they submit vacancy requests for their own department</span>
+    <span style="font-size:12px;color:var(--text-secondary);font-weight:400">Assignments are made in <a href="{{ url_for('organization.departments') }}">Department Management</a> — department managers submit vacancy requests for their own department; any active employee of the branch can be assigned</span>
   </div>
   <div class="table-scroll" tabindex="0" aria-label="Department manager assignments table. Scroll horizontally to see all columns.">
   <table class="tbl">
@@ -165,14 +165,20 @@
     <tbody id="position-catalog-body">
       {% for p in positions %}
       <tr data-position-title="{{ p.position_name|lower }}" data-branch-id="{{ p.branch_id }}" data-department-id="{{ p.department_id }}">
-        <td style="font-weight:600">{{ p.position_name }}</td>
+        <td style="font-weight:600">{{ p.position_name }}
+          {% if p.is_department_manager_position %}<span class="badge badge-amber" title="Hires for this title auto-assign the department manager">Dept Manager</span>{% endif %}
+        </td>
         <td>{{ p.department_name }} <span class="badge badge-gray">{{ p.branch_name }}</span></td>
         <td><span class="badge badge-blue">{{ p.emp_count }}</span></td>
         <td><span class="badge badge-gray">{{ p.posting_count }}</span></td>
         <td style="white-space:nowrap">
-          <form method="POST" action="{{ url_for('organization.rename_position', pid=p.position_id) }}" style="display:inline-flex;gap:4px">
+          <form method="POST" action="{{ url_for('organization.rename_position', pid=p.position_id) }}" style="display:inline-flex;gap:4px;align-items:center">
             <input class="form-input" name="position_name" value="{{ p.position_name }}" style="width:150px;padding:4px 8px" required>
-            <button class="btn btn-sm" type="submit">Rename</button>
+            <label style="font-size:12px;display:flex;align-items:center;gap:3px">
+              <input type="checkbox" name="is_department_manager_position" value="1" {% if p.is_department_manager_position %}checked{% endif %}>
+              Dept Mgr
+            </label>
+            <button class="btn btn-sm" type="submit">Save</button>
           </form>
           <a class="btn btn-sm" href="{{ url_for('employees.list_employees', position_id=p.position_id) }}">View Employees ({{ p.emp_count }})</a>
         </td>
@@ -246,8 +252,8 @@
 <div class="alert alert-info" style="margin-top:16px">
   <span>
     <strong>Note:</strong> Role permissions are hard-coded in the application logic.
-    To change a user's role, go to <a href="{{ url_for('employees.list_employees') }}">Employee Management</a> and edit their profile.
-    To assign a department manager, go to <a href="{{ url_for('organization.departments') }}">Department Management</a>.
+    To change a user's system role, go to <a href="{{ url_for('employees.list_employees') }}">Employee Management</a> and edit their profile.
+    To assign a department manager (any active employee of the branch), go to <a href="{{ url_for('organization.departments') }}">Department Management</a>.
   </span>
 </div>
 

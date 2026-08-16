@@ -129,11 +129,33 @@
     <div class="form-row">
       <div class="form-group mb-0">
         <label class="form-label">System Role *</label>
+        {% if hire_position_info %}
+        <input type="hidden" name="role_id" value="{{ form_data.get('role_id') }}">
+        <select class="form-input" name="role_id_locked" disabled>
+          {% for r in roles %}
+          <option value="{{ r.role_id }}" {{ 'selected' if form_data.get('role_id')|string == r.role_id|string }}>{{ r.role_name }}</option>
+          {% endfor %}
+        </select>
+        {% else %}
         <select class="form-input" name="role_id" required>
           {% for r in roles %}
           <option value="{{ r.role_id }}" {{ 'selected' if form_data.get('role_id')|string == r.role_id|string }}>{{ r.role_name }}</option>
           {% endfor %}
         </select>
+        {% endif %}
+        {% if hire_position_info %}
+        {% if hire_position_info.has_manager %}
+        <div class="card fade-in" style="margin-top:10px;padding:10px 14px;border:1px solid #f5c6c6;background:#fcebeb">
+          <div style="font-size:13px;font-weight:700;color:#a32d2d">Department Manager Position — action required</div>
+          <p style="font-size:12px;color:#7c2b2b;margin:4px 0 0">This position is marked as a Department Manager Position, but {{ hire_position_info.department_name }} already has a manager ({{ hire_position_info.manager_name or 'another employee' }}). Creation will be blocked — reassign the department manager in Department Management first.</p>
+        </div>
+        {% else %}
+        <div class="card fade-in" style="margin-top:10px;padding:10px 14px;border:1px solid var(--g300);background:var(--g50)">
+          <div style="font-size:13px;font-weight:700;color:var(--g700)">Department Manager Position</div>
+          <p style="font-size:12px;color:var(--text-secondary);margin:4px 0 0">The system role is locked to <strong>Employee</strong> for this hire (enforced server-side, never Admin/Manager) — the employee is automatically assigned as department manager of {{ hire_position_info.department_name }}.</p>
+        </div>
+        {% endif %}
+        {% endif %}
       </div>
       <div class="form-group mb-0">
         <label class="form-label">Employment Status</label>

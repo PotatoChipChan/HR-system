@@ -86,6 +86,10 @@ Both rebuild migrations are reference implementations of the framework:
   `migrate_vacancy_openings`) with a timestamped backup, then backfills
   `Filled` postings to `Archived` with `closed_at` preserved/defaulted.
   No-op branch checks for `Archived` in the `Job_Posting` DDL.
+- `init_db.migrate_position_manager_flag()`: additive-only (no rebuild, no
+  backup) — adds `is_department_manager_position INTEGER NOT NULL DEFAULT 0`
+  to the `Position` catalog. Existing positions default to 0, so no existing
+  title ever auto-assigns a department manager. Idempotent.
 
 ## Adding a new migration
 

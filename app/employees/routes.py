@@ -10,7 +10,7 @@ from flask import (Blueprint, render_template, request, redirect,
                    url_for, session, flash, current_app, jsonify,
                    send_from_directory, abort)
 from werkzeug.security import generate_password_hash
-from app.database import query, execute, log_audit, as_dict, is_leave_eligible, close_job_posting_for_application
+from app.database import query, execute, log_audit, as_dict, is_leave_eligible, close_job_posting_for_application, get_db
 from app.auth.routes import login_required, role_required
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance, ImageOps
 from app.notifications.email_service import send_email_notification
@@ -1904,6 +1904,15 @@ def add_employee():
         prefill_data = json.loads(prefill)
         form_data = prefill_data
         contract_id_from_hire = prefill_data.get('contract_id')
+        # Least-privilege default: a hire is never pre-filled as Admin. If the
+        # prefill carries no (or an invalid) system role, the form preselects
+        # the Employee role; HR can still change it explicitly.
+        employee_role = next((role for role in roles if role['role_name'] == 'Employee'), None)
+        if employee_role and str(form_data.get('role_id', '')) != str(employee_role['role_id']):
+            try:
+                int(form_data.get('role_id', ''))
+            except (TypeError, ValueError):
+                form_data['role_id'] = str(employee_role['role_id'])
     elif request.method == 'GET' and request.args.get('setup_branch_manager'):
         form_data = {
             key: request.args.get(key, '')
@@ -1917,6 +1926,16 @@ def add_employee():
     if request.method == 'POST':
         f = request.form
         form_data = f.to_dict()
+        # Least-privilege server-side enforcement: a missing or invalid system
+        # role falls back to Employee (never Admin) on every creation path.
+        employee_role = next((role for role in roles if role['role_name'] == 'Employee'), None)
+        if employee_role:
+            try:
+                role_ok = int(form_data.get('role_id', '')) in [r['role_id'] for r in roles]
+            except (TypeError, ValueError):
+                role_ok = False
+            if not role_ok:
+                form_data['role_id'] = str(employee_role['role_id'])
         try:
             is_from_hire = request.form.get('from_hire') or request.args.get('from_hire')
             password = f['password'] if f.get('password') else None
@@ -1976,6 +1995,7 @@ def add_employee():
             position_id = f.get('position_id') or ''
             position_text = f.get('position', '').strip()
             gender = f.get('gender') or None
+            is_dept_mgr_position = False
             if position_id and position_id != '__custom__':
                 pos = query("SELECT * FROM Position WHERE position_id=? AND is_active=1",
                             (int(position_id),), one=True)
@@ -1985,10 +2005,30 @@ def add_employee():
                     raise ValueError('Invalid position')
                 position_id = pos['position_id']
                 position_text = pos['position_name']
+                is_dept_mgr_position = bool(pos['is_department_manager_position'])
             else:
                 position_id = None  # custom free text stays unlinked until HR catalogues it
 
-            emp_id = execute("""
+            # Department Manager Position: never silently replace an existing
+            # department manager. Check the conflict BEFORE creating the
+            # employee so a failed assignment cannot leave a half-created hire.
+            if is_dept_mgr_position and is_from_hire:
+                # The system role is locked to Employee for this hire, no
+                # matter what the form submitted (crafted Admin/Manager values
+                # must never escalate a department-manager position).
+                if employee_role:
+                    form_data['role_id'] = str(employee_role['role_id'])
+                current_mgr = query("SELECT department_manager_id FROM Department WHERE department_id=?",
+                                    (int(f['department_id']),), one=True)
+                if current_mgr and current_mgr['department_manager_id'] is not None:
+                    mgr_name = query("SELECT full_name FROM Employee WHERE employee_id=?",
+                                     (current_mgr['department_manager_id'],), one=True)
+                    holder = mgr_name['full_name'] if mgr_name else 'another employee'
+                    flash(f'This is a Department Manager position, but the department already has a manager ({holder}). Reassign the department manager first, then create the employee.', 'danger')
+                    error_fields.append('department_manager')
+                    raise ValueError('Department manager conflict')
+
+            emp_sql = """
                 INSERT INTO Employee
                 (company_id,branch_id,department_id,full_name,ic_number,passport_number,contact_no,
                  address,date_of_birth,gender,emergency_contact_name,emergency_contact_no,
@@ -1996,16 +2036,49 @@ def add_employee():
                  role_id,email,personal_email,password_hash,id_document_path,
                  work_start_time, work_end_time)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, (co, f['branch_id'], f['department_id'], f['full_name'],
-                  ic or None, passport_number, f.get('contact_no',''),
-                  f.get('address',''), f.get('date_of_birth',''),
-                  gender, f.get('emergency_contact_name',''),
-                  f.get('emergency_contact_no',''), position_text, position_id,
-                  f['employment_type'], f.get('employment_status','Active'),
-                  f['hire_date'], float(f.get('base_salary', 0)),
-                  f['role_id'], f['email'].lower(), f.get('personal_email',''), pw_hash,
-                  f.get('id_document_path',''),
-                  f.get('work_start_time','09:00'), f.get('work_end_time','18:00')))
+            """
+            emp_params = (co, f['branch_id'], f['department_id'], f['full_name'],
+                          ic or None, passport_number, f.get('contact_no',''),
+                          f.get('address',''), f.get('date_of_birth',''),
+                          gender, f.get('emergency_contact_name',''),
+                          f.get('emergency_contact_no',''), position_text, position_id,
+                          f['employment_type'], f.get('employment_status','Active'),
+                          f['hire_date'], float(f.get('base_salary', 0)),
+                          form_data['role_id'], f['email'].lower(), f.get('personal_email',''), pw_hash,
+                          f.get('id_document_path',''),
+                          f.get('work_start_time','09:00'), f.get('work_end_time','18:00'))
+
+            # Least-privilege department responsibility: the flagged position
+            # hires an Employee-role user who is additionally recorded as the
+            # department manager (never the broad Manager system role). The
+            # Employee INSERT and the conditional Department UPDATE are one
+            # SQLite transaction: if the department was taken concurrently
+            # (zero-row UPDATE), everything rolls back — no employee row, no
+            # permissions, no leave balances, no contract/application change,
+            # no audit event. The project execute() helper is deliberately not
+            # used here because it commits after every statement.
+            if is_dept_mgr_position and is_from_hire:
+                db = get_db()
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    cur = db.execute(emp_sql, emp_params)
+                    emp_id = cur.lastrowid
+                    assignment = db.execute("""UPDATE Department SET department_manager_id=?
+                                               WHERE department_id=? AND department_manager_id IS NULL""",
+                                            (emp_id, int(f['department_id'])))
+                    if assignment.rowcount != 1:
+                        raise ValueError('Department manager conflict')
+                    db.commit()
+                except ValueError:
+                    db.rollback()
+                    flash('This is a Department Manager position, but the department already has a manager. Reassign the department manager first, then create the employee.', 'danger')
+                    error_fields.append('department_manager')
+                    raise
+                except Exception:
+                    db.rollback()
+                    raise
+            else:
+                emp_id = execute(emp_sql, emp_params)
 
             # Move IC files from ocr_temp/ to final location
             ocr_temp_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], 'ocr_temp')
@@ -2029,7 +2102,7 @@ def add_employee():
                         (emp_id, lt['leave_type_id'], yr, lt['default_days']))
 
             # Automatically assign permissions based on role
-            assign_role_permissions(emp_id, int(f['role_id']), session.get('user_id'))
+            assign_role_permissions(emp_id, int(form_data['role_id']), session.get('user_id'))
 
             # Link contract to employee if hiring from offer
             if is_from_hire and contract_id_from_hire:
@@ -2044,7 +2117,12 @@ def add_employee():
                     # Close the job posting
                     close_job_posting_for_application(app_row['application_id'])
 
-            role_name = query("SELECT role_name FROM Role WHERE role_id=?", (int(f['role_id']),), one=True)['role_name']
+            role_name = query("SELECT role_name FROM Role WHERE role_id=?", (int(form_data['role_id']),), one=True)['role_name']
+
+            if is_dept_mgr_position and is_from_hire:
+                log_audit('DEPT_MANAGER_AUTO_ASSIGN', 'Employee',
+                          f'Employee {emp_id} ({f["full_name"]}) auto-assigned as manager of department {f["department_id"]} (Department Manager Position)',
+                          'Department', f.get('department_id'), action_details={'employee_id': emp_id})
 
             log_audit('CREATE', 'Employee', f'Created employee {f["full_name"]} with role {role_name}',
                       'Employee', emp_id, 'Success', {'email': f['email'], 'role': role_name})
@@ -2100,10 +2178,37 @@ def add_employee():
         ORDER BY p.position_name
     """)
 
+    # Hire-flow explanation: when the prefilled position is a Department
+    # Manager Position, tell HR what will happen automatically (and warn when
+    # the department already has a manager).
+    hire_position_info = None
+    if request.args.get('from_hire') or form_data.get('from_hire'):
+        prefill_pid = form_data.get('position_id') or ''
+        if prefill_pid and prefill_pid != '__custom__':
+            try:
+                pos_row = query("""SELECT p.*, d.department_name,
+                                          d.department_manager_id,
+                                          m.full_name AS manager_name
+                                   FROM Position p
+                                   JOIN Department d ON p.department_id=d.department_id
+                                   LEFT JOIN Employee m ON d.department_manager_id=m.employee_id
+                                   WHERE p.position_id=? AND p.is_active=1""",
+                                (int(prefill_pid),), one=True)
+                if pos_row and pos_row['is_department_manager_position']:
+                    hire_position_info = {
+                        'position_name': pos_row['position_name'],
+                        'department_name': pos_row['department_name'],
+                        'has_manager': pos_row['department_manager_id'] is not None,
+                        'manager_name': pos_row['manager_name'],
+                    }
+            except (TypeError, ValueError):
+                pass
+
     return render_template('employees/add.html',
                            departments=departments, branches=branches, roles=roles,
                            positions=positions,
                            form_data=form_data,
+                           hire_position_info=hire_position_info,
                            setup_branch_manager=request.args.get('setup_branch_manager') == '1'
                                                 or form_data.get('setup_branch_manager') == '1',
                            error_fields=error_fields if error_fields else [])
@@ -2214,7 +2319,8 @@ def view_employee(emp_id):
                            pending_requests_for_me=pending_requests_for_me,
                            employee_contract=employee_contract,
                            has_face_registered=has_face_registered,
-                           is_on_leave_today=is_on_leave_today)
+                           is_on_leave_today=is_on_leave_today,
+                           roles=query("SELECT * FROM Role ORDER BY role_id"))
 
 
 @emp_bp.route('/<int:emp_id>/edit', methods=['POST'])

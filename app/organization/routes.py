@@ -43,15 +43,22 @@ def _workflow_return_url(raw_url, **prefill):
                    if value not in (None, '')})
     return urlunsplit(('', '', parsed.path, urlencode(params), ''))
 
-def _get_managers_for_company(company_id):
+def _get_dept_manager_candidates(company_id):
+    """Active employees eligible to be assigned as a department manager.
+
+    Any active employee of the company may hold department-manager
+    responsibility (least-privilege: the system role stays whatever it is —
+    department-manager authority comes from Department.department_manager_id).
+    """
     return query("""
         SELECT e.employee_id, e.full_name, e.branch_id, b.name AS branch_name,
+               r.role_name,
                COALESCE(p.position_name, e.position) AS position_name
         FROM Employee e
         JOIN Role r ON e.role_id = r.role_id
         JOIN Branch b ON e.branch_id = b.branch_id
         LEFT JOIN Position p ON e.position_id = p.position_id
-        WHERE r.role_name IN ('Manager', 'HR Manager') AND e.is_active = 1 AND b.company_id = ?
+        WHERE e.is_active = 1 AND b.company_id = ?
         ORDER BY b.name, e.full_name
     """, (company_id,))
 
@@ -561,10 +568,12 @@ def add_department():
         dept_mgr = f.get('department_manager_id')
         dept_mgr = int(dept_mgr) if dept_mgr else None
         if dept_mgr:
-            mgr = query("SELECT branch_id FROM Employee WHERE employee_id=? AND is_active=1",
+            mgr = query("""SELECT e.branch_id, b.company_id
+                           FROM Employee e JOIN Branch b ON e.branch_id=b.branch_id
+                           WHERE e.employee_id=? AND e.is_active=1""",
                         (dept_mgr,), one=True)
-            if not mgr or mgr['branch_id'] != int(branch_id):
-                flash('The selected department manager does not belong to the selected branch.', 'danger')
+            if not mgr or mgr['branch_id'] != int(branch_id) or mgr['company_id'] != branch['company_id']:
+                flash('The selected department manager must be an active employee of this branch in the same company.', 'danger')
                 return redirect(back)
         did = execute("INSERT INTO Department (branch_id, department_name, department_manager_id) VALUES (?,?,?)",
                       (branch_id, dept_name, dept_mgr))
@@ -582,7 +591,7 @@ def add_department():
     # GET: list branches and managers for the company
     co = _get_company_id()
     branches = query("SELECT branch_id, name FROM Branch WHERE company_id=? ORDER BY name", (co,))
-    managers = _get_managers_for_company(co)
+    managers = _get_dept_manager_candidates(co)
     return render_template('organization/department_form.html', department=None, branches=branches, managers=managers,
                            prefill_branch=request.args.get('branch_id', ''),
                            return_to=_workflow_return_url(request.args.get('return_to', '')) or '',
@@ -613,22 +622,24 @@ def edit_department(did):
         if not new_name:
             flash('Department name is required.', 'danger')
             branches = query("SELECT branch_id, name FROM Branch WHERE company_id=? ORDER BY name", (dept['company_id'],))
-            managers = _get_managers_for_company(dept['company_id'])
+            managers = _get_dept_manager_candidates(dept['company_id'])
             return render_template('organization/department_form.html', department=dept, branches=branches, managers=managers)
         if len(new_name) < 2 or len(new_name) > 100:
             flash('Department name must be 2-100 characters.', 'danger')
             branches = query("SELECT branch_id, name FROM Branch WHERE company_id=? ORDER BY name", (dept['company_id'],))
-            managers = _get_managers_for_company(dept['company_id'])
+            managers = _get_dept_manager_candidates(dept['company_id'])
             return render_template('organization/department_form.html', department=dept, branches=branches, managers=managers)
         dept_mgr = f.get('department_manager_id')
         dept_mgr = int(dept_mgr) if dept_mgr else None
         if dept_mgr:
-            mgr = query("SELECT branch_id FROM Employee WHERE employee_id=? AND is_active=1",
+            mgr = query("""SELECT e.branch_id, b.company_id
+                           FROM Employee e JOIN Branch b ON e.branch_id=b.branch_id
+                           WHERE e.employee_id=? AND e.is_active=1""",
                         (dept_mgr,), one=True)
-            if not mgr or mgr['branch_id'] != dept['branch_id']:
-                flash('The selected department manager does not belong to this department\'s branch.', 'danger')
+            if not mgr or mgr['branch_id'] != dept['branch_id'] or mgr['company_id'] != dept['company_id']:
+                flash('The selected department manager must be an active employee of this branch in the same company.', 'danger')
                 branches = query("SELECT branch_id, name FROM Branch WHERE company_id=? ORDER BY name", (dept['company_id'],))
-                managers = _get_managers_for_company(dept['company_id'])
+                managers = _get_dept_manager_candidates(dept['company_id'])
                 return render_template('organization/department_form.html', department=dept, branches=branches, managers=managers)
         execute("UPDATE Department SET department_name=?, department_manager_id=? WHERE department_id=?", (new_name, dept_mgr, did))
         log_audit('UPDATE', 'Organization', f'Updated department id={did}', 'Department', did)
@@ -637,7 +648,7 @@ def edit_department(did):
 
     # GET: branches and managers for the same company
     branches = query("SELECT branch_id, name FROM Branch WHERE company_id=? ORDER BY name", (dept['company_id'],))
-    managers = _get_managers_for_company(dept['company_id'])
+    managers = _get_dept_manager_candidates(dept['company_id'])
     return render_template('organization/department_form.html', department=dept, branches=branches, managers=managers)
 
 
@@ -770,10 +781,13 @@ def add_position():
         flash(f'Position "{name}" already exists in this department.', 'warning')
         return redirect(back)
 
-    pid = execute("INSERT INTO Position(position_name, department_id) VALUES(?,?)", (name, dept_id))
+    is_dept_mgr_position = 1 if request.form.get('is_department_manager_position') == '1' else 0
+    pid = execute("INSERT INTO Position(position_name, department_id, is_department_manager_position) VALUES(?,?,?)",
+                  (name, dept_id, is_dept_mgr_position))
     log_audit('CREATE_POSITION', 'Organization',
               f'Added position "{name}" to department {dept_id}',
-              'Position', None, action_details={'position_name': name, 'department_id': dept_id})
+              'Position', None, action_details={'position_name': name, 'department_id': dept_id,
+                                                'is_department_manager_position': is_dept_mgr_position})
     flash(f'Position "{name}" added to the catalog.', 'success')
     workflow_return = _workflow_return_url(request.form.get('return_to', ''),
                                             branch_id=request.form.get('branch_id', ''),
@@ -805,8 +819,11 @@ def rename_position(pid):
     if dup:
         flash(f'Position "{name}" already exists in this department.', 'warning')
         return redirect(url_for('organization.roles'))
-    execute("UPDATE Position SET position_name=? WHERE position_id=?", (name, pid))
+    is_dept_mgr_position = 1 if request.form.get('is_department_manager_position') == '1' else 0
+    execute("UPDATE Position SET position_name=?, is_department_manager_position=? WHERE position_id=?",
+            (name, is_dept_mgr_position, pid))
     log_audit('RENAME_POSITION', 'Organization',
-              f'Renamed position {pid} to "{name}"', 'Position', pid)
-    flash('Position renamed.', 'success')
+              f'Renamed position {pid} to "{name}"',
+              'Position', pid, action_details={'is_department_manager_position': is_dept_mgr_position})
+    flash('Position updated.', 'success')
     return redirect(url_for('organization.roles'))

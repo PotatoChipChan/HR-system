@@ -40,6 +40,14 @@
       <input class="form-input" type="text" name="position_name" value="{{ prefill_name }}" placeholder="e.g. Senior Accountant" required minlength="2" maxlength="100">
     </div>
 
+    <div class="form-group" style="display:flex;gap:10px;align-items:flex-start">
+      <input type="checkbox" name="is_department_manager_position" value="1" id="dept-mgr-flag" style="margin-top:3px">
+      <div>
+        <label class="label" for="dept-mgr-flag" style="margin:0">Department Manager Position</label>
+        <p style="font-size:12px;color:var(--text-secondary);margin-top:2px">Hires for this title default to the Employee system role and are automatically assigned as manager of the posting department (never the broad Manager role). No title text is inferred — only this explicit setting.</p>
+      </div>
+    </div>
+
     <div style="margin-top:16px">
       <button class="btn btn-primary" type="submit">{{ 'Add Position & Create Manager' if continue_setup else 'Add Position' }}</button>
       <a href="{{ return_to or url_for('organization.roles') }}" class="btn">Cancel</a>
