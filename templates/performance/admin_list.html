@@ -4,9 +4,9 @@
 
 {% block content %}
 <div class="card fade-in" style="margin-bottom:20px">
-  <div class="sec-title">
+  <div class="sec-title performance-toolbar">
     <span>Yearly Performance Review — {{ year }}</span>
-    <div style="display:flex;gap:8px;align-items:center">
+    <div class="performance-controls" style="display:flex;gap:8px;align-items:center">
       <form method="GET" action="{{ url_for('performance.list_scores') }}" style="display:flex;gap:8px;align-items:center">
         <select class="form-input" name="month" id="perf-month" style="width:130px">
           <option value="" {{ 'selected' if not month }}>Yearly View</option>
@@ -65,7 +65,8 @@
   {% endif %}
 
   {% if reviews %}
-  <table class="tbl">
+  <div class="table-scroll performance-table-scroll" tabindex="0" aria-label="Performance review table. Scroll horizontally to see all columns.">
+  <table class="tbl performance-table">
     <thead>
       <tr>
         <th>Employee</th>
@@ -102,6 +103,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
   <div class="empty-state">
     <div class="icon">📊</div>

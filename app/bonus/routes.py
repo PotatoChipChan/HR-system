@@ -10,6 +10,24 @@ from datetime import datetime, date
 GRADE_ORDER = ['A', 'B', 'C', 'D']
 
 
+def _safe_year(raw):
+    try:
+        year = int(raw) if raw not in (None, '') else datetime.now().year
+    except (TypeError, ValueError):
+        return None
+    return year if 1 <= year <= 9999 else None
+
+
+def _safe_filter_id(raw):
+    if raw in (None, ''):
+        return ''
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return ''
+    return str(value) if value > 0 else ''
+
+
 def _get_or_create_bonus_policy(company_id, year):
     """Return Bonus_Policy row for a company/year, creating defaults if missing."""
     policy = query("""
@@ -62,26 +80,36 @@ def _calculate_bonus(base_salary, grade, policy, employee_id, year):
 
 @bonus_bp.route('/policy', methods=['GET', 'POST'])
 @login_required
-@role_required('Admin', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR Manager')
 def bonus_policy():
     co = session['company_id']
-    year = int(request.args.get('year', datetime.now().year))
+    year = _safe_year(request.args.get('year'))
+    if year is None:
+        flash('Invalid year filter ignored.', 'warning')
+        year = datetime.now().year
     policy = _get_or_create_bonus_policy(co, year)
 
     if request.method == 'POST':
         try:
+            grade_months = [
+                float(request.form.get('grade_A_months', 3.0)),
+                float(request.form.get('grade_B_months', 2.0)),
+                float(request.form.get('grade_C_months', 1.0)),
+                float(request.form.get('grade_D_months', 0.5)),
+            ]
+            tenure = int(request.form.get('tenure_threshold_months', 3))
+            payout_month = int(request.form.get('payout_month', 1))
+            if any(value < 0 for value in grade_months) or tenure < 0 or not 1 <= payout_month <= 12:
+                raise ValueError('Policy values are out of range')
             execute("""
                 UPDATE Bonus_Policy
                 SET grade_A_months=?, grade_B_months=?, grade_C_months=?, grade_D_months=?,
                     tenure_threshold_months=?, payout_month=?, auto_propose=?, updated_at=datetime('now')
                 WHERE policy_id=?
             """, (
-                float(request.form.get('grade_A_months', 3.0)),
-                float(request.form.get('grade_B_months', 2.0)),
-                float(request.form.get('grade_C_months', 1.0)),
-                float(request.form.get('grade_D_months', 0.5)),
-                int(request.form.get('tenure_threshold_months', 3)),
-                int(request.form.get('payout_month', 1)),
+                *grade_months,
+                tenure,
+                payout_month,
                 1 if request.form.get('auto_propose') else 0,
                 policy['policy_id']
             ))
@@ -98,14 +126,21 @@ def bonus_policy():
 
 @bonus_bp.route('/')
 @login_required
-@role_required('Admin', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR Manager')
 def list_bonuses():
     co = session['company_id']
-    year = int(request.args.get('year', datetime.now().year))
+    year = _safe_year(request.args.get('year'))
+    if year is None:
+        flash('Invalid year filter ignored.', 'warning')
+        year = datetime.now().year
     grade_f = request.args.get('grade', '')
     status_f = request.args.get('status', '')
-    branch_f = request.args.get('branch_id', '')
-    dept_f = request.args.get('department_id', '')
+    raw_branch_f = request.args.get('branch_id', '')
+    raw_dept_f = request.args.get('department_id', '')
+    branch_f = _safe_filter_id(raw_branch_f)
+    dept_f = _safe_filter_id(raw_dept_f)
+    if (raw_branch_f and not branch_f) or (raw_dept_f and not dept_f):
+        flash('Invalid branch or department filter ignored.', 'warning')
     search = request.args.get('search', '')
 
     policy = _get_or_create_bonus_policy(co, year)
@@ -173,10 +208,13 @@ def list_bonuses():
 
 @bonus_bp.route('/propose', methods=['GET', 'POST'])
 @login_required
-@role_required('Admin', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR Manager')
 def propose_bonuses():
     co = session['company_id']
-    year = int(request.args.get('year', datetime.now().year))
+    year = _safe_year(request.args.get('year'))
+    if year is None:
+        flash('Invalid proposal year.', 'danger')
+        return redirect(url_for('bonus.propose_bonuses'))
     policy = _get_or_create_bonus_policy(co, year)
     uid = session['user_id']
 
@@ -243,7 +281,7 @@ def propose_bonuses():
 
 @bonus_bp.route('/bulk-action', methods=['POST'])
 @login_required
-@role_required('Admin', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR Manager')
 def bulk_action():
     ids = request.form.getlist('proposal_ids')
     action = request.form.get('action')
@@ -300,7 +338,7 @@ def bulk_action():
 
 @bonus_bp.route('/<int:prop_id>/approve', methods=['POST'])
 @login_required
-@role_required('Admin', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR Manager')
 def approve_bonus(prop_id):
     uid = session['user_id']
     prop = query("""
@@ -338,7 +376,7 @@ def approve_bonus(prop_id):
 
 @bonus_bp.route('/<int:prop_id>/reject', methods=['POST'])
 @login_required
-@role_required('Admin', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR Manager')
 def reject_bonus(prop_id):
     uid = session['user_id']
     reason = request.form.get('rejection_reason', '').strip() or 'No reason provided'
@@ -366,7 +404,7 @@ def reject_bonus(prop_id):
 @login_required
 def api_pending_count():
     role = session.get('user_role')
-    if role not in ('Admin', 'HR Manager', 'HR Director'):
+    if role not in ('Admin', 'HR Manager'):
         return jsonify({'count': 0})
     co = session['company_id']
     year = datetime.now().year

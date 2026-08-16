@@ -6,11 +6,24 @@
 
 {% block content %}
 
+<div class="card fade-in section-gap" aria-label="Organisation setup shortcuts">
+  <div class="sec-title">
+    <span>Organisation Setup</span>
+    <span style="font-size:12px;color:var(--text-secondary);font-weight:400">Set up a branch, then its departments and position titles before adding employees or job postings.</span>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px">
+    <a class="btn" href="{{ url_for('organization.branches') }}">Manage Branches</a>
+    <a class="btn" href="{{ url_for('organization.departments') }}">Manage Departments</a>
+    <a class="btn btn-primary" href="{{ url_for('organization.add_position') }}">+ Add Position Title</a>
+  </div>
+</div>
+
 <div class="card fade-in section-gap">
   <div class="sec-title">
     <span>System Roles</span>
-    <span style="font-size:12px;color:var(--text-secondary);font-weight:400">6 fixed roles — permissions are code-enforced</span>
+    <span style="font-size:12px;color:var(--text-secondary);font-weight:400">5 fixed roles — permissions are code-enforced</span>
   </div>
+  <div class="table-scroll" tabindex="0" aria-label="System roles table. Scroll horizontally to see all columns.">
   <table class="tbl">
     <thead>
       <tr>
@@ -27,8 +40,7 @@
         <td>
           <span class="badge
             {%- if r.role_name == 'Admin' %} badge-red
-            {%- elif r.role_name == 'HR Director' %} badge-purple
-            {%- elif r.role_name == 'HR Manager' %} badge-green
+            {%- elif r.role_name == 'HR Manager' %} badge-purple
             {%- elif r.role_name == 'HR' %} badge-blue
             {%- elif r.role_name == 'Manager' %} badge-amber
             {%- else %} badge-gray{% endif %}">{{ r.role_name }}</span>
@@ -37,10 +49,8 @@
         <td>
           {% if r.role_name == 'Admin' %}
             Full system access, user management, organisation settings.
-          {% elif r.role_name == 'HR Director' %}
-            Inherits all Admin privileges — full system access, approvals, organisation settings.
           {% elif r.role_name == 'HR Manager' %}
-            Inherits Admin &amp; HR permissions — leave/invoice/vacancy approval, interview scheduling.
+            Inherits all Admin privileges — full system access, approvals, organisation settings.
           {% elif r.role_name == 'HR' %}
             Personnel management, leave approvals, payroll, reports.
           {% elif r.role_name == 'Manager' %}
@@ -57,14 +67,16 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 
 {% if dept_managers %}
 <div class="card fade-in section-gap">
   <div class="sec-title">
     <span>Department Manager Assignments</span>
-    <span style="font-size:12px;color:var(--text-secondary);font-weight:400">Managers assigned via Department Management — they submit vacancy requests for their own department</span>
+    <span style="font-size:12px;color:var(--text-secondary);font-weight:400">Managers are assigned in <a href="{{ url_for('organization.departments') }}">Department Management</a> — they submit vacancy requests for their own department</span>
   </div>
+  <div class="table-scroll" tabindex="0" aria-label="Department manager assignments table. Scroll horizontally to see all columns.">
   <table class="tbl">
     <thead>
       <tr>
@@ -79,6 +91,7 @@
       <tr>
         <td style="font-weight:600">{{ dm.department_name }}</td>
         <td><span class="badge badge-gray">{{ dm.branch_name }}</span></td>
+        {% if dm.manager_name %}
         <td>
           <div style="display:flex;align-items:center;gap:10px">
             <div class="avatar" style="width:32px;height:32px;font-size:11px">{{ dm.manager_name[:2].upper() }}</div>
@@ -89,12 +102,17 @@
           </div>
         </td>
         <td>
-          <span class="badge {% if dm.role_name == 'HR Manager' %}badge-green{% else %}badge-amber{% endif %}">{{ dm.role_name }}</span>
+          <span class="badge {% if dm.role_name == 'HR Manager' %}badge-green{% else %}badge-amber{% endif %}">{{ dm.role_name or '—' }}</span>
         </td>
+        {% else %}
+        <td><span class="badge badge-gray">Unassigned</span></td>
+        <td><span class="badge badge-gray">—</span></td>
+        {% endif %}
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endif %}
 
@@ -103,31 +121,37 @@
     <span>Position Catalog</span>
     <span style="font-size:12px;color:var(--text-secondary);font-weight:400">Predefined job titles per department — used by vacancy requests, job postings &amp; employee records</span>
   </div>
-  <form method="POST" action="{{ url_for('organization.add_position') }}">
-    <div class="form-row">
-      <div class="form-group"><label class="label">New Position Title</label>
-        <input class="form-input" name="position_name" placeholder="e.g. Senior Accountant" required>
-      </div>
-      <div class="form-group"><label class="label">Department</label>
-        <div style="display:flex;align-items:center;gap:8px">
-          <select class="form-input" name="department_id" required>
-            <option value="">Select department</option>
-            {% for d in departments %}
-            <option value="{{ d.department_id }}">{{ d.department_name }} ({{ d.branch_name }})</option>
-            {% endfor %}
-          </select>
-          <a href="{{ url_for('organization.add_department') }}" title="Add department"
-             style="white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;gap:6px;color:var(--text-secondary);opacity:.4">
-            <span class="btn btn-sm" style="padding:9px 12px;font-size:14px;border:1px solid var(--border);background:var(--bg-primary);border-radius:12px;cursor:pointer">+</span>
-            <span style="font-size:12px">add department</span>
-          </a>
-        </div>
-      </div>
+
+  <div style="margin:16px 0">
+    <a class="btn btn-primary" href="{{ url_for('organization.add_position') }}">+ New Position Title</a>
+    <span style="font-size:12px;color:var(--text-secondary);margin-left:8px">Opens a page where you pick the branch, then the department it belongs to.</span>
+  </div>
+
+  <form class="filter-bar" id="position-catalog-filters" style="margin-top:16px" role="search">
+    <div class="form-group" style="min-width:200px;flex:1"><label class="label" for="position-q">Search title</label>
+      <input class="form-input" id="position-q" placeholder="Search position title" autocomplete="off">
     </div>
-    <div style="margin-top:4px"><button class="btn btn-primary" type="submit">+ Add Position</button></div>
+    <div class="form-group"><label class="label" for="position-branch">Branch</label>
+      <select class="form-input" id="position-branch" name="position_branch">
+        <option value="">All branches</option>
+        {% for b in position_branches %}
+        <option value="{{ b.branch_id }}">{{ b.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group"><label class="label" for="position-department">Department</label>
+      <select class="form-input" id="position-department" name="position_department">
+        <option value="">All departments</option>
+        {% for d in departments %}
+        <option value="{{ d.department_id }}">{{ d.department_name }} ({{ d.branch_name }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="display:flex;align-items:end;gap:8px"><button class="btn btn-primary" type="submit">Search</button><button class="btn" id="clear-position-filters" type="button" hidden>Clear</button></div>
   </form>
 
   {% if positions %}
+  <div class="table-scroll" tabindex="0" aria-label="Position catalog table. Scroll horizontally to see all columns.">
   <table class="tbl" style="margin-top:16px">
     <thead>
       <tr>
@@ -135,45 +159,89 @@
         <th>Department / Branch</th>
         <th>Employees</th>
         <th>Postings</th>
-        <th>Status</th>
         <th>Actions</th>
       </tr>
     </thead>
-    <tbody>
+    <tbody id="position-catalog-body">
       {% for p in positions %}
-      <tr{% if not p.is_active %} style="opacity:.55"{% endif %}>
+      <tr data-position-title="{{ p.position_name|lower }}" data-branch-id="{{ p.branch_id }}" data-department-id="{{ p.department_id }}">
         <td style="font-weight:600">{{ p.position_name }}</td>
         <td>{{ p.department_name }} <span class="badge badge-gray">{{ p.branch_name }}</span></td>
         <td><span class="badge badge-blue">{{ p.emp_count }}</span></td>
         <td><span class="badge badge-gray">{{ p.posting_count }}</span></td>
-        <td>
-          {% if p.is_active %}<span class="badge badge-green">Active</span>
-          {% else %}<span class="badge badge-gray">Inactive</span>{% endif %}
-        </td>
         <td style="white-space:nowrap">
           <form method="POST" action="{{ url_for('organization.rename_position', pid=p.position_id) }}" style="display:inline-flex;gap:4px">
             <input class="form-input" name="position_name" value="{{ p.position_name }}" style="width:150px;padding:4px 8px" required>
             <button class="btn btn-sm" type="submit">Rename</button>
           </form>
-          <form method="POST" action="{{ url_for('organization.toggle_position', pid=p.position_id) }}" style="display:inline">
-            {% if p.is_active %}
-            <button class="btn btn-sm btn-outline-danger" type="submit">Deactivate</button>
-            {% else %}
-            <button class="btn btn-sm btn-success" type="submit">Activate</button>
-            {% endif %}
-          </form>
+          <a class="btn btn-sm" href="{{ url_for('employees.list_employees', position_id=p.position_id) }}">View Employees ({{ p.emp_count }})</a>
         </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
+  <div id="position-filter-empty" class="empty-state" style="display:none;padding:32px 24px" aria-live="polite">
+    <p style="margin:0">No positions match the current filters.</p>
+  </div>
   {% else %}
   <div class="empty-state" style="padding:32px 24px">
     <p style="margin:0">No positions in the catalog yet. Add one above — or run the migration to import existing titles.</p>
   </div>
   {% endif %}
-  <p style="font-size:12px;color:var(--text-secondary);margin-top:12px">Deactivating a position hides it from new requests/forms; existing employees and postings keep their link.</p>
+  <p style="font-size:12px;color:var(--text-secondary);margin-top:12px">Positions remain available for new requests and forms. Use View Employees to see everyone assigned to a position.</p>
+
+  {% if empty_departments %}
+  <div class="alert alert-warning" style="margin-top:16px">
+    <span>
+      <strong>Departments without catalog positions:</strong>
+      {% for d in empty_departments %}{{ d.department_name }} ({{ d.branch_name }}){% if not loop.last %}, {% endif %}{% endfor %}
+      — use <strong>+ New Position Title</strong> to add one.
+    </span>
+  </div>
+  {% endif %}
 </div>
+
+<script>
+  (function() {
+    const filters = document.getElementById('position-catalog-filters');
+    const rows = Array.from(document.querySelectorAll('#position-catalog-body tr'));
+    if (!filters || !rows.length) return;
+    const title = document.getElementById('position-q');
+    const branch = document.getElementById('position-branch');
+    const department = document.getElementById('position-department');
+    const clear = document.getElementById('clear-position-filters');
+    const empty = document.getElementById('position-filter-empty');
+
+    function applyPositionFilters() {
+      const query = title.value.trim().toLowerCase();
+      let visible = 0;
+      rows.forEach(function(row) {
+        const matches = (!query || row.dataset.positionTitle.includes(query))
+          && (!branch.value || row.dataset.branchId === branch.value)
+          && (!department.value || row.dataset.departmentId === department.value);
+        row.hidden = !matches;
+        if (matches) visible += 1;
+      });
+      clear.hidden = !(query || branch.value || department.value);
+      empty.style.display = visible ? 'none' : 'block';
+    }
+
+    filters.addEventListener('submit', function(event) {
+      event.preventDefault();
+      applyPositionFilters();
+    });
+    title.addEventListener('input', applyPositionFilters);
+    [branch, department].forEach(function(control) {
+      control.addEventListener('change', applyPositionFilters);
+    });
+    clear.addEventListener('click', function() {
+      filters.reset();
+      applyPositionFilters();
+      title.focus();
+    });
+  })();
+</script>
 
 <div class="alert alert-info" style="margin-top:16px">
   <span>

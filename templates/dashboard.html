@@ -94,10 +94,11 @@
   </div>
 
   <!-- Recent Activity for Employee -->
-  <div class="card">
+  <div class="card dashboard-recent-activity">
     <div class="sec-title">Your Recent Activity</div>
     {% if own_pending %}
       <h4 style="margin-bottom:8px;font-size:14px;color:var(--text-secondary)">Pending Applications</h4>
+      <div class="table-scroll" tabindex="0" aria-label="Pending applications table. Scroll horizontally to see all columns.">
       <table class="tbl" style="margin-bottom:20px">
         <thead><tr><th>Type</th><th>Reference</th><th>Status</th></tr></thead>
         <tbody>
@@ -110,10 +111,12 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% endif %}
     
     {% if recent_payslips %}
       <h4 style="margin-bottom:8px;font-size:14px;color:var(--text-secondary)">Recent Payslips</h4>
+      <div class="table-scroll" tabindex="0" aria-label="Recent payslips table. Scroll horizontally to see all columns.">
       <table class="tbl">
         <thead><tr><th>Period</th><th>Net Pay</th><th>Status</th></tr></thead>
         <tbody>
@@ -126,6 +129,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% endif %}
     
     <div class="btn-row" style="margin-top:12px;margin-bottom:0;display:flex;gap:8px;">
@@ -134,6 +138,37 @@
     </div>
   </div>
 </div>
+
+{% if session.get('is_dept_manager') %}
+<div class="card" style="margin-bottom:20px">
+  <div class="sec-title">
+    My Job Posting Requests
+    <div style="display:flex;gap:8px">
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('recruitment.my_vacancy_requests') }}">View All</a>
+      <a class="btn btn-sm btn-primary" href="{{ url_for('recruitment.vacancy_request') }}">+ Request Job Posting</a>
+    </div>
+  </div>
+  {% if my_vacancy_requests %}
+  <div class="table-scroll" tabindex="0" aria-label="Job posting requests table. Scroll horizontally to see all columns.">
+  <table class="tbl">
+    <thead><tr><th>Position</th><th>Department</th><th>Status</th><th>Submitted</th></tr></thead>
+    <tbody>
+      {% for r in my_vacancy_requests %}
+      <tr>
+        <td><strong>{{ r.position_title }}</strong></td>
+        <td>{{ r.department_name }}</td>
+        <td><span class="badge {% if r.status=='Approved' %}badge-green{% elif r.status=='Rejected' %}badge-red{% else %}badge-blue{% endif %}">{{ r.status }}</span></td>
+        <td>{{ r.created_at[:10] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div class="empty-state"><div class="icon">📋</div><p>No job posting requests yet</p></div>
+  {% endif %}
+</div>
+{% endif %}
 
 {% else %}
 <!-- ADMIN/HR/MANAGER DASHBOARD -->
@@ -152,7 +187,7 @@
   <div class="metric-card">
     <div class="metric-label">Total Active Employees</div>
     <div class="metric-val green-val">{{ total_emp }}</div>
-    <div class="metric-sub">In your organisation</div>
+    <div class="metric-sub">{% if session.user_role == 'Manager' %}In your branch{% else %}In your organisation{% endif %}</div>
   </div>
   <div class="metric-card">
     <div class="metric-label">On Leave Today</div>
@@ -173,7 +208,7 @@
 
 <div class="two-col">
   <!-- Recent Activity -->
-  <div class="card">
+  <div class="card dashboard-recent-activity">
     <div class="sec-title">Recent Activity</div>
     {% if activity %}
       {% for log in activity %}
@@ -198,6 +233,7 @@
       Pending Queue
     </div>
     {% if pending_q %}
+    <div class="table-scroll" tabindex="0" aria-label="Pending approvals table. Scroll horizontally to see all columns.">
     <table class="tbl">
       <thead><tr><th>Type</th><th>Reference</th><th>Employee</th><th>Status</th></tr></thead>
       <tbody>
@@ -226,16 +262,17 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
     {% else %}
       <div class="empty-state"><div class="icon">✅</div><p>No pending items</p></div>
     {% endif %}
-    {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+    {% if session.user_role in ['Admin','HR Manager','HR'] %}
     <div class="btn-row" style="margin-top:12px;margin-bottom:0;display:flex;gap:8px;flex-wrap:wrap;">
       <a class="btn btn-primary btn-sm" href="{{ url_for('leave.approve_list') }}">Leave</a>
       <a class="btn btn-secondary btn-sm" href="{{ url_for('invoice.claims_management') }}" style="background:var(--secondary-color, #475569);border-color:var(--secondary-color, #475569);color:white;">Claims</a>
       <a class="btn btn-secondary btn-sm" href="{{ url_for('recruitment.list_applications') }}" style="background:#6366f1;border-color:#6366f1;color:white;">Applications</a>
 
-      {% if session.user_role in ['Admin','HR Director','HR Manager'] %}
+      {% if session.user_role in ['Admin','HR Manager'] %}
       <a class="btn btn-secondary btn-sm" href="{{ url_for('bonus.list_bonuses') }}" style="background:#10b981;border-color:#10b981;color:white;">Bonuses</a>
       <a class="btn btn-secondary btn-sm" href="{{ url_for('increment.list_increments') }}" style="background:#8b5cf6;border-color:#8b5cf6;color:white;">Increments</a>
       {% endif %}
@@ -247,6 +284,38 @@
     {% endif %}
   </div>
 </div>
+
+{% if session.user_role == 'Manager' %}
+<div class="card" style="margin-bottom:20px">
+  <div class="sec-title">
+    My Job Posting Requests
+    <div style="display:flex;gap:8px">
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('recruitment.my_vacancy_requests') }}">View All</a>
+      <a class="btn btn-sm btn-primary" href="{{ url_for('recruitment.vacancy_request') }}">+ Request Job Posting</a>
+    </div>
+  </div>
+  {% if my_vacancy_requests %}
+  <div class="table-scroll" tabindex="0" aria-label="Job posting requests table. Scroll horizontally to see all columns.">
+  <table class="tbl">
+    <thead><tr><th>Position</th><th>Department</th><th>Status</th><th>Submitted</th><th></th></tr></thead>
+    <tbody>
+      {% for r in my_vacancy_requests %}
+      <tr>
+        <td><strong>{{ r.position_title }}</strong></td>
+        <td>{{ r.department_name }}</td>
+        <td><span class="badge {% if r.status=='Approved' %}badge-green{% elif r.status=='Rejected' %}badge-red{% else %}badge-blue{% endif %}">{{ r.status }}</span></td>
+        <td>{{ r.created_at[:10] }}</td>
+        <td><a href="{{ url_for('recruitment.view_vacancy_request', rid=r.request_id) }}" class="btn btn-sm">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div class="empty-state"><div class="icon">📋</div><p>No job posting requests yet</p></div>
+  {% endif %}
+</div>
+{% endif %}
 
 <!-- Department Distribution -->
 {% if dept_dist %}
@@ -271,7 +340,7 @@
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-  var toasts = ['increment-toast', 'bonus-toast', 'apps-toast', 'leave-toast', 'invoice-toast'];
+  var toasts = ['increment-toast', 'bonus-toast', 'apps-toast', 'leave-toast', 'invoice-toast', 'vacancy-toast'];
   toasts.forEach(function(id) {
     var toast = document.getElementById(id);
     if (toast) {

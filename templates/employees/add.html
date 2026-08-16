@@ -5,6 +5,13 @@
 {% block content %}
 <div style="max-width:800px">
 <form method="POST" action="{{ url_for('employees.add_employee') }}">
+  {% if setup_branch_manager %}
+  <input type="hidden" name="setup_branch_manager" value="1">
+  <div class="card fade-in" style="margin-bottom:20px;border:1px solid var(--g300);background:var(--g50)">
+    <div style="font-weight:700;color:var(--g700)">Guided branch setup — create the manager</div>
+    <p style="font-size:13px;color:var(--text-secondary);margin:6px 0 0">The new branch, department, and position are preselected. Manager is the suggested role; confirm it is appropriate before creating the employee.</p>
+  </div>
+  {% endif %}
   <div class="card fade-in" style="margin-bottom:20px;border:1px dashed var(--g300);background:var(--g50)">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div>
@@ -12,7 +19,7 @@
         <div style="font-size:12px;color:var(--text-secondary)">Upload IC to auto-fill details.</div>
       </div>
       <div class="btn-group" style="display:flex;gap:8px">
-        <a href="{{ url_for('employees.upload_ic', from_hire=request.args.get('from_hire')) }}" class="btn btn-sm btn-primary">
+        <a href="{{ url_for('employees.upload_ic', from_hire=request.args.get('from_hire') or form_data.get('from_hire')) }}" class="btn btn-sm btn-primary">
           📷 Upload MyKad (IC)
         </a>
       </div>
@@ -20,7 +27,7 @@
   </div>
 
   <input type="hidden" name="id_document_path" id="id_document_path" value="{{ form_data.get('id_document_path','') }}">
-  {% if request.args.get('from_hire') %}<input type="hidden" name="from_hire" value="1">{% endif %}
+  {% if request.args.get('from_hire') or form_data.get('from_hire') %}<input type="hidden" name="from_hire" value="1">{% endif %}
 
   <div class="card fade-in" style="margin-bottom:20px">
     <div class="sec-title">Personal Information</div>
@@ -140,7 +147,7 @@
 
   <div class="card fade-in" style="margin-bottom:20px">
     <div class="sec-title">Login Credentials</div>
-    {% if request.args.get('from_hire') %}
+    {% if request.args.get('from_hire') or form_data.get('from_hire') %}
     <p style="color:var(--text-secondary);font-size:13px;margin-bottom:12px">
       A temporary password will be auto-generated and sent to the Personal Email above.
     </p>
@@ -161,7 +168,12 @@
   </div>
 
   <div class="btn-row">
+    {% if setup_branch_manager %}
+    <button class="btn btn-primary" type="submit" name="continue_setup" value="posting">Create Employee &amp; Start Job Posting</button>
+    <button class="btn" type="submit" name="continue_setup" value="finish">Create Employee</button>
+    {% else %}
     <button class="btn btn-primary" type="submit">Create Employee</button>
+    {% endif %}
     <a class="btn" href="{{ url_for('employees.list_employees') }}">Cancel</a>
   </div>
 </form>
@@ -313,6 +325,18 @@ function validateForm(e) {
     }
 
     if (isValid) {
+        // Native form.submit() omits the clicked submit button. Preserve the
+        // guided-flow action before submitting programmatically.
+        if (e.submitter && e.submitter.name === 'continue_setup') {
+            var continueInput = form.querySelector('input[name="continue_setup"]');
+            if (!continueInput) {
+                continueInput = document.createElement('input');
+                continueInput.type = 'hidden';
+                continueInput.name = 'continue_setup';
+                form.appendChild(continueInput);
+            }
+            continueInput.value = e.submitter.value;
+        }
         form.submit();
     } else {
         // Scroll to first error

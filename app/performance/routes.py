@@ -4,7 +4,79 @@ from app.database import query, execute, log_audit
 from app.auth.routes import login_required, role_required
 from app.performance.calculator import calculate_monthly_score, calculate_yearly_review
 from app.performance import perf_bp
-from datetime import datetime
+from datetime import datetime, date, timedelta
+
+
+def _period_from_request(month_raw, year_raw, *, allow_empty_month=True):
+    """Return a safe reporting period without letting crafted values raise 500s."""
+    try:
+        month = int(month_raw) if month_raw not in (None, '') else 0
+        year = int(year_raw) if year_raw not in (None, '') else datetime.now().year
+    except (TypeError, ValueError):
+        return None, None
+    if year < 1 or year > 9999 or month < 0 or month > 12:
+        return None, None
+    if not allow_empty_month and month == 0:
+        return None, None
+    return month, year
+
+
+def _add_yearly_attendance_evidence(reviews, year):
+    """Attach the attendance counts used to explain yearly review scores.
+
+    Performance_Review persists score components, not the underlying day
+    counts. The review list still promises that evidence, so derive it from
+    the same approved-attendance date range used by the yearly calculator.
+    """
+    if not reviews:
+        return reviews
+
+    review_rows = [dict(review) for review in reviews]
+    employee_ids = [review['employee_id'] for review in review_rows]
+    placeholders = ','.join('?' for _ in employee_ids)
+    year_start = date(year, 1, 1)
+    year_end = date(year, 12, 31)
+    attendance_rows = query(f"""
+        SELECT e.employee_id, e.hire_date,
+               COUNT(DISTINCT date(a.check_in)) AS days_present
+        FROM Employee e
+        LEFT JOIN Attendance a ON a.employee_id=e.employee_id
+            AND a.status='Approved'
+            AND date(a.check_in) >= CASE WHEN e.hire_date > ? THEN e.hire_date ELSE ? END
+            AND date(a.check_in) <= ?
+        WHERE e.employee_id IN ({placeholders})
+        GROUP BY e.employee_id, e.hire_date
+    """, [year_start.isoformat(), year_start.isoformat(), year_end.isoformat(), *employee_ids])
+    attendance = {row['employee_id']: row for row in attendance_rows}
+
+    for review in review_rows:
+        row = attendance.get(review['employee_id'])
+        start = year_start
+        if row and row['hire_date']:
+            try:
+                hire_date = datetime.strptime(row['hire_date'], '%Y-%m-%d').date()
+                start = max(start, hire_date)
+            except ValueError:
+                pass
+        review['days_present'] = row['days_present'] if row else 0
+        review['total_working_days'] = sum(
+            1 for day_offset in range((year_end - start).days + 1)
+            if (start + timedelta(days=day_offset)).weekday() < 5
+        )
+    return review_rows
+
+
+def _yearly_summary(reviews):
+    """Summarise the already scope-filtered review rows for the header cards."""
+    if not reviews:
+        return None
+    count = len(reviews)
+    return {
+        'count': count,
+        'avg_score': round(sum(review['composite_score'] for review in reviews) / count, 1),
+        'avg_att': round(sum(review['attendance_rate'] for review in reviews) / count, 1),
+        'avg_punct': round(sum(review['punctuality'] for review in reviews) / count, 1),
+    }
 
 
 @perf_bp.route('/')
@@ -14,9 +86,11 @@ def list_scores():
     role = session['user_role']
     co = session['company_id']
 
-    month_raw = request.args.get('month', '')
-    month = int(month_raw) if month_raw else 0
-    year = int(request.args.get('year', datetime.now().year))
+    month, year = _period_from_request(request.args.get('month', ''),
+                                       request.args.get('year', ''))
+    if month is None:
+        flash('Use a valid month and year filter.', 'danger')
+        month, year = 0, datetime.now().year
 
     # Manager/Employee monthly drill-down view
     if month:
@@ -85,29 +159,29 @@ def list_scores():
             ORDER BY e.full_name
         """, (co, year))
 
-    summary = query("""
-        SELECT COUNT(*) as count,
-               ROUND(AVG(composite_score), 1) as avg_score,
-               ROUND(AVG(attendance_rate), 1) as avg_att,
-               ROUND(AVG(punctuality), 1) as avg_punct
-        FROM Performance_Review
-        WHERE period_year=?
-    """, (year,), one=True) if reviews else None
+    reviews = _add_yearly_attendance_evidence(reviews, year)
+
+    # `reviews` has already been filtered for the current user's permitted
+    # branch/company scope. Derive the cards from those rows so a manager does
+    # not see company-wide aggregate data above a branch-only table.
+    summary = _yearly_summary(reviews)
 
     return render_template('performance/admin_list.html',
                            reviews=reviews, year=year, summary=summary, role=role)
 
 
 @perf_bp.route('/generate', methods=['POST'])
-@role_required('Admin', 'HR', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR', 'HR Manager')
 def generate_scores():
     co = session['company_id']
-    month = request.form.get('month', '')
-    year = int(request.form.get('year', datetime.now().year))
+    month, year = _period_from_request(request.form.get('month', ''),
+                                       request.form.get('year', ''))
+    if month is None:
+        flash('Use a valid month and year.', 'danger')
+        return redirect(url_for('performance.list_scores'))
 
     # If month is provided, generate monthly scores (drill-down); otherwise generate yearly review
     if month:
-        month = int(month)
         att_exists = query("""
             SELECT COUNT(*) as c FROM Attendance
             WHERE strftime('%m', check_in) = ? AND strftime('%Y', check_in) = ?
@@ -177,7 +251,20 @@ def generate_scores():
 @login_required
 def api_score(employee_id):
     """Return the latest yearly performance review for an employee (for bonus/increment integration)."""
-    year = int(request.args.get('year', datetime.now().year))
+    _, year = _period_from_request('', request.args.get('year', ''))
+    if year is None:
+        return jsonify({'error': 'Use a valid year.'}), 400
+
+    target = query("SELECT employee_id, branch_id FROM Employee WHERE employee_id=?",
+                   (employee_id,), one=True)
+    if not target:
+        return jsonify({'error': 'Employee not found.'}), 404
+
+    role = session['user_role']
+    if role == 'Employee' and target['employee_id'] != session['user_id']:
+        return jsonify({'error': 'Access denied.'}), 403
+    if role == 'Manager' and target['branch_id'] != session.get('branch_id'):
+        return jsonify({'error': 'Access denied.'}), 403
 
     score = query("""
         SELECT * FROM Performance_Review

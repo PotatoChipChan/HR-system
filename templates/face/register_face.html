@@ -3,444 +3,138 @@
 {% block title %}Face Registration - {{ employee.full_name }}{% endblock %}
 
 {% block content %}
-<div class="face-reg-container fade-in">
-    <div class="card">
-        <div class="card-header">
-            <h4 class="mb-0">👤 Face Registration</h4>
-        </div>
-        <div class="card-body">
-            <!-- Employee Info -->
-            <div class="alert alert-info mb-4">
-                <strong>Employee:</strong> {{ employee.full_name }} (ID: {{ employee.employee_id }})<br>
-                <strong>Email:</strong> {{ employee.email }}<br>
-                {% if already_registered %}
-                <span class="badge badge-warning">Face already registered - will be replaced</span>
-                {% endif %}
-            </div>
-
-            <!-- Camera Section -->
-            <div class="camera-section">
-                <div class="camera-stage">
-                    <h5 class="camera-title" id="stageTitle">📹 Camera Preview</h5>
-                    <div class="video-wrapper">
-                        <video id="videoElement" autoplay playsinline class="video-feed"></video>
-                        <div id="faceOverlay" class="face-overlay"></div>
-                        <div id="countdownOverlay" class="countdown-overlay" style="display: none;">
-                            <div class="countdown-circle">
-                                <span id="countdownNumber">3</span>
-                            </div>
-                            <p class="countdown-label" id="countdownLabel">Position your face</p>
-                        </div>
-                        <div id="progressOverlay" class="progress-overlay" style="display: none;">
-                            <div class="progress-ring">
-                                <svg width="120" height="120">
-                                    <circle class="progress-bg" cx="60" cy="60" r="54" fill="none" stroke="#e5e7eb" stroke-width="8"/>
-                                    <circle class="progress-fill" id="progressCircle" cx="60" cy="60" r="54" fill="none" stroke="#22c55e" stroke-width="8" stroke-dasharray="339" stroke-dashoffset="339" stroke-linecap="round" transform="rotate(-90 60 60)"/>
-                                </svg>
-                                <span class="progress-text" id="progressText">Analyzing...</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div id="qualityIndicators" class="quality-indicators" style="display: none;">
-                        <div class="quality-item" id="qFace"><span class="qi-dot"></span><span>Face Detected</span></div>
-                        <div class="quality-item" id="qCenter"><span class="qi-dot"></span><span>Centered</span></div>
-                        <div class="quality-item" id="qSize"><span class="qi-dot"></span><span>Good Size</span></div>
-                        <div class="quality-item" id="qLight"><span class="qi-dot"></span><span>Good Lighting</span></div>
-                    </div>
-                </div>
-
-                <!-- Instructions -->
-                <div class="alert alert-warning instructions-box">
-                    <strong>📋 Instructions:</strong>
-                    <ul class="mb-0 mt-2">
-                        <li>Click <strong>"Start Registration"</strong> to activate camera and begin</li>
-                        <li>Position your face in the center of the frame</li>
-                        <li>Stay still for <strong>{{ REG_DURATION }} seconds</strong> while we capture</li>
-                        <li>Ensure good lighting, no shadows on face</li>
-                        <li>Remove sunglasses and hats</li>
-                        <li>Camera will turn off automatically after registration</li>
-                    </ul>
-                </div>
-            </div>
-
-                <!-- Buttons -->
-                <div class="btn-group-vertical" id="btnGroup">
-                    <button id="startBtn" class="btn btn-primary btn-lg" onclick="startRegistration()" style="color:#000">
-                        🎬 Start Registration
-                    </button>
-                    <div id="cancelBtnWrapper" style="display: none; margin-top: 10px;">
-                        <button id="cancelBtn" class="btn btn-secondary btn-lg" onclick="cancelRegistration()">
-                            ✕ Cancel
-                        </button>
-                    </div>
-                </div>
-
-            <!-- Back Link -->
-            <div class="mt-3 text-center">
-                <a href="{{ url_for('face.registration_list') }}" class="btn btn-outline-secondary">
-                    ← Back to Registration List
-                </a>
-            </div>
-
-                <!-- Status Messages -->
-                <div id="statusMessage" style="display: none; margin-top: 15px;">
-                    <div id="successMsg" class="alert alert-success" style="display: none;">
-                        <strong>✅ Success!</strong> <span id="successText"></span>
-                    </div>
-                    <div id="errorMsg" class="alert alert-danger" style="display: none;">
-                        <strong>❌ Error:</strong> <span id="errorText"></span>
-                    </div>
-                    <div id="loadingMsg" class="alert alert-info" style="display: none;">
-                        <strong>⏳ Processing...</strong> Please wait while we register your face.
-                    </div>
-                </div>
-        </div>
+<div style="max-width:800px;margin:0 auto">
+  <div class="card fade-in">
+    <div class="sec-title">
+      👤 Face Registration
+      <a href="{{ url_for('face.registration_list') }}" class="btn btn-sm btn-outline-secondary">← Back to Registration List</a>
     </div>
+
+    <!-- Employee Info -->
+    <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:14px 18px;margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="avatar" style="width:40px;height:40px;font-size:14px">{{ employee.full_name[:2].upper() }}</div>
+        <div>
+          <div style="font-weight:600">{{ employee.full_name }}</div>
+          <div style="font-size:12px;color:var(--text-secondary)">ID: #{{ '%04d'|format(employee.employee_id) }} · {{ employee.email }}</div>
+        </div>
+        {% if already_registered %}
+        <span class="badge badge-amber" style="margin-left:auto">Face already registered — will be replaced</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Buttons (above camera so they're always visible) -->
+    <div style="margin-bottom:16px;display:flex;gap:10px">
+      <button id="startBtn" class="btn btn-primary" onclick="startRegistration()" style="flex:1;justify-content:center">
+        🎬 Start Registration
+      </button>
+      <button id="cancelBtnWrapper" class="btn btn-outline-secondary" onclick="cancelRegistration()" style="display:none;flex:1;justify-content:center">
+        ✕ Cancel
+      </button>
+    </div>
+
+    <!-- Camera + Instructions -->
+    <div style="display:flex;flex-direction:column;gap:20px" class="cam-layout">
+      <!-- Camera -->
+      <div style="flex:1;min-width:0">
+        <div id="stageTitle" style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;text-align:center">
+          Click "Start Registration" to begin
+        </div>
+        <div id="cameraWrap" style="position:relative;width:100%;aspect-ratio:4/3;min-height:240px;background:#000;border-radius:12px;overflow:hidden;border:2px solid var(--border)">
+          <video id="videoElement" autoplay playsinline style="width:100%;height:100%;object-fit:cover;transform:scaleX(-1);background:#000"></video>
+          <div id="faceOverlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;display:none"></div>
+
+          <!-- Countdown overlay -->
+          <div id="countdownOverlay" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,.6);color:#fff;flex-direction:column;align-items:center;justify-content:center;z-index:10">
+            <div style="width:100px;height:100px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;margin-bottom:16px;border:3px solid var(--g400)">
+              <span id="countdownNumber" style="font-size:48px;font-weight:700;font-family:'Space Grotesk',sans-serif">3</span>
+            </div>
+            <p id="countdownLabel" style="font-size:16px;margin:0;opacity:.9">Get ready…</p>
+          </div>
+
+          <!-- Progress overlay -->
+          <div id="progressOverlay" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,.7);color:#fff;flex-direction:column;align-items:center;justify-content:center;z-index:10">
+            <div style="position:relative;margin-bottom:16px">
+              <svg width="120" height="120">
+                <circle cx="60" cy="60" r="54" fill="none" stroke="#e5e7eb" stroke-width="8"/>
+                <circle id="progressCircle" cx="60" cy="60" r="54" fill="none" stroke="var(--g400)" stroke-width="8" stroke-dasharray="339" stroke-dashoffset="339" stroke-linecap="round" transform="rotate(-90 60 60)"/>
+              </svg>
+              <span id="progressText" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:500">Analyzing…</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quality indicators -->
+        <div id="qualityIndicators" style="display:none;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:12px">
+          <div id="qFace" class="face-qi"><span class="face-qi-dot"></span><span>Face Detected</span></div>
+          <div id="qCenter" class="face-qi"><span class="face-qi-dot"></span><span>Centered</span></div>
+          <div id="qSize" class="face-qi"><span class="face-qi-dot"></span><span>Good Size</span></div>
+          <div id="qLight" class="face-qi"><span class="face-qi-dot"></span><span>Good Lighting</span></div>
+        </div>
+      </div>
+
+      <!-- Instructions -->
+      <div style="flex:0 0 45%;min-width:240px">
+        <div style="background:#faeeda;border:1px solid #fde68a;border-radius:12px;padding:16px">
+          <strong style="color:#854f0b;font-size:14px">📋 Instructions</strong>
+          <ul style="padding-left:20px;margin:8px 0 0;font-size:13px;line-height:1.7;color:var(--text-primary)">
+            <li>Click <strong>"Start Registration"</strong> to activate the camera</li>
+            <li>Position your face in the center of the frame</li>
+            <li>Stay still for <strong>{{ REG_DURATION }} seconds</strong> while we capture</li>
+            <li>Ensure good lighting, no shadows on face</li>
+            <li>Remove sunglasses and hats</li>
+            <li>Camera turns off automatically after registration</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Messages -->
+    <div id="statusMessage" style="display:none;margin-top:16px">
+      <div id="successMsg" style="display:none;background:rgba(34,197,94,.1);color:#166534;padding:14px 18px;border-radius:12px;font-size:14px">
+        <strong>✅ Success!</strong> <span id="successText"></span>
+      </div>
+      <div id="errorMsg" style="display:none;background:rgba(239,68,68,.1);color:#a32d2d;padding:14px 18px;border-radius:12px;font-size:14px">
+        <strong>❌ Error:</strong> <span id="errorText"></span>
+      </div>
+      <div id="loadingMsg" style="display:none;background:rgba(59,130,246,.1);color:#0c447c;padding:14px 18px;border-radius:12px;font-size:14px">
+        <strong>⏳ Processing…</strong> Please wait while we register your face.
+      </div>
+    </div>
+  </div>
 </div>
 
 <style>
-/* Face Registration Specific Styles */
-.face-reg-container {
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 0 16px;
-}
-
-.card {
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    overflow: hidden;
-}
-
-.card-header {
-    background: var(--primary-color);
-    color: white;
-    padding: 16px 20px;
-    border: none;
-}
-
-.card-body {
-    padding: 24px;
-}
-
-.alert {
-    padding: 16px;
-    border-radius: 8px;
-    border: none;
-}
-
-.alert-info { background: rgba(59, 130, 246, 0.1); color: var(--text-primary); }
-.alert-warning { background: rgba(245, 158, 11, 0.1); color: var(--text-primary); }
-.alert-success { background: rgba(34, 197, 94, 0.1); color: var(--success-color); }
-.alert-danger { background: rgba(239, 68, 68, 0.1); color: var(--danger-color); }
-
-.badge {
-    display: inline-block;
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 600;
-    border-radius: 20px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.badge-warning { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
-.badge-success { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
-.badge-danger { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
-
-/* Camera Section Layout */
-.camera-section {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-}
-
-.camera-stage {
-    flex: 1;
-    min-width: 0;
-    position: relative;
-}
-
-.camera-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 12px;
-    text-align: center;
-}
-
-/* Video wrapper - responsive with aspect ratio */
-.video-wrapper {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 4 / 3;
-    background: #000;
-    border-radius: 8px;
-    overflow: hidden;
-    border: 2px solid var(--border-color);
-}
-
-.video-feed {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    transform: scaleX(-1); /* Mirror for selfie view */
-    background: #000;
-}
-
-/* Face overlay - shows detection box */
-.face-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    display: none;
-}
-
-.face-box {
-    position: absolute;
-    border: 2px solid #22c55e;
-    border-radius: 4px;
-    box-shadow: 0 0 0 9999px rgba(0,0,0,0.3);
-    transition: all 0.1s ease;
-}
-
-.face-box.good { border-color: #22c55e; }
-.face-box.warning { border-color: #f59e0b; }
-.face-box.bad { border-color: #ef4444; }
-
-/* Countdown overlay */
-.countdown-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0, 0, 0, 0.6);
-    color: white;
-    z-index: 10;
-}
-
-.countdown-circle {
-    width: 100px;
-    height: 100px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.2);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 16px;
-    border: 3px solid var(--primary-color);
-}
-
-#countdownNumber {
-    font-size: 48px;
-    font-weight: 700;
-    font-family: 'Space Grotesk', sans-serif;
-}
-
-.countdown-label {
-    font-size: 16px;
-    margin: 0;
-    opacity: 0.9;
-}
-
-/* Progress overlay */
-.progress-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0, 0, 0, 0.7);
-    color: white;
-    z-index: 10;
-}
-
-.progress-ring {
-    position: relative;
-    margin-bottom: 16px;
-}
-
-.progress-text {
-    font-size: 16px;
-    font-weight: 500;
-}
-
-/* Quality indicators */
-.quality-indicators {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: center;
-    margin-top: 12px;
-    padding: 0 8px;
-}
-
-.quality-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    background: var(--bg-secondary);
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    transition: all 0.2s ease;
-}
-
-.quality-item.active {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-}
-
-.quality-item.warning {
-    background: rgba(245, 158, 11, 0.15);
-    color: #f59e0b;
-}
-
-.qi-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--border-color);
-    transition: all 0.2s ease;
-}
-
-.quality-item.active .qi-dot { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
-.quality-item.warning .qi-dot { background: #f59e0b; box-shadow: 0 0 8px #f59e0b; }
-
-/* Instructions Box */
-.instructions-box ul {
-    padding-left: 20px;
-    margin: 0;
-}
-
-.instructions-box li {
-    margin-bottom: 6px;
-    font-size: 13px;
-    line-height: 1.5;
-}
-
-/* Button Styles */
-.btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 12px 20px;
-    font-size: 14px;
-    font-weight: 600;
-    border-radius: 8px;
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    width: 100%;
-}
-
-.btn-lg { padding: 14px 24px; font-size: 15px; }
-
-.btn-primary { background: var(--primary-color); color: white; border-color: var(--primary-color); }
-.btn-primary:hover { opacity: 0.9; }
-
-.btn-success { background: var(--success-color); color: white; border-color: var(--success-color); }
-.btn-success:hover { opacity: 0.9; }
-
-.btn-secondary { background: var(--bg-secondary); color: var(--text-primary); border-color: var(--border-color); }
-.btn-secondary:hover { background: var(--border-color); }
-
-.btn-outline-secondary { background: transparent; color: var(--text-primary); border-color: var(--border-color); }
-.btn-outline-secondary:hover { background: var(--bg-secondary); }
-
-.btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-}
-
-.btn-group-vertical {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-/* Desktop Layout: Two columns */
-@media (min-width: 768px) {
-    .camera-section {
-        flex-direction: row;
-        align-items: flex-start;
-    }
-
-    .camera-stage {
-        flex: 0 0 55%;
-        max-width: 55%;
-    }
-
-    .instructions-box {
-        flex: 0 0 45%;
-        max-width: 45%;
-        padding-left: 20px;
-    }
-}
-
-/* Large Desktop */
-@media (min-width: 1024px) {
-    .face-reg-container {
-        max-width: 1000px;
-    }
-    .camera-stage { flex: 0 0 60%; max-width: 60%; }
-    .instructions-box { flex: 0 0 40%; max-width: 40%; }
-}
-
-/* Mobile */
-@media (max-width: 767px) {
-    .card-body { padding: 16px; }
-    .instructions-box { order: -1; }
-    .camera-title { font-size: 13px; }
-    .instructions-box li { font-size: 12px; }
-    .countdown-circle { width: 80px; height: 80px; }
-    #countdownNumber { font-size: 36px; }
-}
-
-@media (max-width: 480px) {
-    .face-reg-container { padding: 0 8px; }
-    .card-header h4 { font-size: 16px; }
-    .quality-item { font-size: 11px; padding: 5px 10px; }
-}
+/* Camera-specific styles only — all other components use global styles */
+.face-qi{display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--bg-secondary);border-radius:20px;font-size:12px;font-weight:500;color:var(--text-secondary);transition:all .2s}
+.face-qi.active{background:rgba(34,197,94,.15);color:#16a34a}
+.face-qi.warning{background:rgba(245,158,11,.15);color:#d97706}
+.face-qi-dot{width:8px;height:8px;border-radius:50%;background:var(--border);transition:all .2s}
+.face-qi.active .face-qi-dot{background:#16a34a;box-shadow:0 0 8px #16a34a}
+.face-qi.warning .face-qi-dot{background:#d97706;box-shadow:0 0 8px #d97706}
+.face-box{position:absolute;border:2px solid #16a34a;border-radius:4px;box-shadow:0 0 0 9999px rgba(0,0,0,.3);transition:all .1s ease}
+.face-box.good{border-color:#16a34a}.face-box.warning{border-color:#d97706}.face-box.bad{border-color:#dc2626}
+@media(min-width:768px){.cam-layout{flex-direction:row;align-items:flex-start}}
 </style>
 
 <script>
 // ─────────────────────────────────────────────────────────────────────────
 // CONFIGURATION
 // ─────────────────────────────────────────────────────────────────────────
-
-const REG_DURATION = {{ REG_DURATION | default(5) }}; // seconds
-const MIN_FACE_SIZE_RATIO = 0.25; // face should be at least 25% of frame
-const MAX_FACE_CENTER_OFFSET = 0.15; // face center within 15% of frame center
-const MIN_BRIGHTNESS = 50; // minimum average brightness (0-255)
+const REG_DURATION = {{ REG_DURATION | default(5) }};
+const MIN_FACE_SIZE_RATIO = 0.25;
+const MAX_FACE_CENTER_OFFSET = 0.15;
+const MIN_BRIGHTNESS = 50;
 const MAX_BRIGHTNESS = 200;
-const DETECTION_INTERVAL = 300; // ms between face detections
-const MIN_VALID_FRAMES = Math.floor(REG_DURATION * 1000 / DETECTION_INTERVAL * 0.3); // need 30% valid frames
+const DETECTION_INTERVAL = 300;
+const MIN_VALID_FRAMES = Math.floor(REG_DURATION * 1000 / DETECTION_INTERVAL * 0.3);
 
 // ─────────────────────────────────────────────────────────────────────────
 // STATE
 // ─────────────────────────────────────────────────────────────────────────
-
 let videoStream = null;
-let registrationState = 'idle'; // idle, countdown, capturing, ready, registering
+let registrationState = 'idle';
 let countdownTimer = null;
 let progressTimer = null;
 let startTime = 0;
@@ -451,34 +145,16 @@ let bestFrame = null;
 // ─────────────────────────────────────────────────────────────────────────
 // CAMERA INITIALIZATION
 // ─────────────────────────────────────────────────────────────────────────
-
 async function initCamera() {
     try {
-        const constraints = {
-            video: {
-                facingMode: 'user',
-                width: { ideal: 640 },
-                height: { ideal: 480 }
-            },
-            audio: false
-        };
-
+        const constraints = { video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false };
         videoStream = await navigator.mediaDevices.getUserMedia(constraints);
         const video = document.getElementById('videoElement');
         video.srcObject = videoStream;
-        
-        await new Promise((resolve, reject) => {
-            video.onloadedmetadata = () => {
-                video.play().then(resolve).catch(reject);
-            };
-            video.onerror = () => reject(video.error);
-        });
-        
-        // Wait a bit for the first frame to render
+        await new Promise((resolve, reject) => { video.onloadedmetadata = () => video.play().then(resolve).catch(reject); video.onerror = () => reject(video.error); });
         await new Promise(r => setTimeout(r, 300));
-        
-        console.log('✅ Camera initialized, playing:', !video.paused, 'dimensions:', video.videoWidth, 'x', video.videoHeight);
-        updateStageTitle('Camera ready. Get ready...');
+        console.log('Camera initialized:', video.videoWidth, 'x', video.videoHeight);
+        updateStageTitle('Camera ready. Get ready…');
         return true;
     } catch (error) {
         showError(`Camera Error: ${error.message}`);
@@ -487,23 +163,13 @@ async function initCamera() {
     }
 }
 
-document.addEventListener('DOMContentLoaded', function() {
-    updateStageTitle('Click "Start Registration" to begin');
-    updateButtons();
-});
-
-window.addEventListener('beforeunload', function() {
-    cleanup();
-});
+document.addEventListener('DOMContentLoaded', function() { updateButtons(); });
+window.addEventListener('beforeunload', function() { cleanup(); });
 
 function cleanup() {
     clearAllTimers();
-    if (videoStream) {
-        videoStream.getTracks().forEach(track => track.stop());
-        videoStream = null;
-    }
+    if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
 }
-
 function clearAllTimers() {
     captureRunning = false;
     if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
@@ -513,16 +179,12 @@ function clearAllTimers() {
 // ─────────────────────────────────────────────────────────────────────────
 // REGISTRATION FLOW
 // ─────────────────────────────────────────────────────────────────────────
-
 async function startRegistration() {
     if (registrationState !== 'idle') return;
-    
     registrationState = 'countdown';
     resetState();
-    
     const ok = await initCamera();
     if (!ok) { registrationState = 'idle'; return; }
-    
     showCountdown();
     updateButtons();
 }
@@ -531,17 +193,11 @@ function showCountdown() {
     let count = 3;
     document.getElementById('countdownNumber').textContent = count;
     document.getElementById('countdownOverlay').style.display = 'flex';
-    document.getElementById('countdownLabel').textContent = 'Get ready...';
-    
+    document.getElementById('countdownLabel').textContent = 'Get ready…';
     countdownTimer = setInterval(() => {
         count--;
-        if (count > 0) {
-            document.getElementById('countdownNumber').textContent = count;
-        } else {
-            clearInterval(countdownTimer);
-            countdownTimer = null;
-            startCapturePhase();
-        }
+        if (count > 0) { document.getElementById('countdownNumber').textContent = count; }
+        else { clearInterval(countdownTimer); countdownTimer = null; startCapturePhase(); }
     }, 1000);
 }
 
@@ -552,35 +208,21 @@ function startCapturePhase() {
     document.getElementById('countdownOverlay').style.display = 'none';
     document.getElementById('progressOverlay').style.display = 'flex';
     document.getElementById('qualityIndicators').style.display = 'flex';
-    updateStageTitle('Capturing... Keep your face in the frame');
-    
+    updateStageTitle('Capturing… Keep your face in the frame');
     startTime = Date.now();
     validFrames = [];
     allFrames = [];
     bestFrame = null;
     captureRunning = true;
-    
-    // Start sequential face detection (no pile-up)
     scheduleNextCapture();
-    
-    // Progress ring animation
-    const progressCircle = document.getElementById('progressCircle');
     const circumference = 339;
     progressTimer = setInterval(() => {
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / (REG_DURATION * 1000), 1);
-        const offset = circumference * (1 - progress);
-        progressCircle.style.strokeDashoffset = offset;
-        
+        document.getElementById('progressCircle').style.strokeDashoffset = circumference * (1 - progress);
         const remaining = Math.ceil(REG_DURATION - elapsed / 1000);
-        document.getElementById('progressText').textContent = 
-            remaining > 0 ? `Capturing... ${remaining}s` : 'Processing...';
-        
-        if (progress >= 1) {
-            captureRunning = false;
-            clearInterval(progressTimer);
-            finishCapturePhase();
-        }
+        document.getElementById('progressText').textContent = remaining > 0 ? `Capturing… ${remaining}s` : 'Processing…';
+        if (progress >= 1) { captureRunning = false; clearInterval(progressTimer); finishCapturePhase(); }
     }, 50);
 }
 
@@ -588,122 +230,73 @@ async function scheduleNextCapture() {
     if (!captureRunning) return;
     const startWait = Date.now();
     await captureAndAnalyzeFrame();
-    const elapsed = Date.now() - startWait;
-    const delay = Math.max(0, DETECTION_INTERVAL - elapsed);
+    const delay = Math.max(0, DETECTION_INTERVAL - (Date.now() - startWait));
     setTimeout(scheduleNextCapture, delay);
 }
 
 async function captureAndAnalyzeFrame() {
     const video = document.getElementById('videoElement');
     if (video.videoWidth === 0) return;
-    
-    // Create a temporary canvas for analysis
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    // Convert to base64 for server-side analysis
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
     const imageData = canvas.toDataURL('image/jpeg', 0.85);
     allFrames.push({ imageData, timestamp: Date.now() });
-    
     try {
         const response = await fetch('/face/api/analyze_frame', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ image: imageData })
         });
-        
         if (!response.ok) {
             let errDetail = '';
             try { const j = await response.json(); errDetail = j.error || j.msg || ''; } catch(_) { errDetail = await response.text(); }
-            console.error('Analyze frame HTTP error:', response.status, errDetail);
             updateStageTitle('⚠️ Server error: ' + (errDetail || response.status));
             return;
         }
-        
         const result = await response.json();
-        
-        if (!result.success) {
-            console.warn('Frame analysis failed:', result.error);
-            return;
-        }
-        
-        // Determine if frame is valid — face must be detected; centering/size/lighting are best-effort
-        const isValid = result.face_detected;
-        const quality = result.quality_score / 100;
-        
+        if (!result.success) { console.warn('Frame analysis failed:', result.error); return; }
         updateQualityIndicators(result);
         updateFaceOverlay(result);
-        
-        if (isValid) {
-            validFrames.push({ imageData, quality, timestamp: Date.now() });
-            if (!bestFrame || quality > bestFrame.quality) {
-                bestFrame = { imageData, quality, timestamp: Date.now() };
+        if (result.face_detected) {
+            validFrames.push({ imageData, quality: result.quality_score / 100, timestamp: Date.now() });
+            if (!bestFrame || result.quality_score / 100 > bestFrame.quality) {
+                bestFrame = { imageData, quality: result.quality_score / 100, timestamp: Date.now() };
             }
         }
     } catch (e) {
-        console.error('Frame analysis fetch error:', e.message || e);
+        console.error('Frame analysis error:', e.message);
         updateStageTitle('⚠️ Network error: ' + (e.message || 'Check connection'));
     }
 }
 
 function updateQualityIndicators(result) {
-    const items = {
-        qFace: result.face_detected,
-        qCenter: result.centered,
-        qSize: result.good_size,
-        qLight: result.good_lighting
-    };
-    
+    const items = { qFace: result.face_detected, qCenter: result.centered, qSize: result.good_size, qLight: result.good_lighting };
     Object.entries(items).forEach(([id, valid]) => {
         const el = document.getElementById(id);
         if (!el) return;
         el.classList.remove('active', 'warning');
-        if (valid) {
-            el.classList.add('active');
-        } else {
-            el.classList.add('warning');
-        }
+        el.classList.add(valid ? 'active' : 'warning');
     });
 }
 
 function updateFaceOverlay(result) {
     const overlay = document.getElementById('faceOverlay');
-    if (!result.face_detected || !result.face_box) {
-        overlay.style.display = 'none';
-        return;
-    }
-    
+    if (!result.face_detected || !result.face_box) { overlay.style.display = 'none'; return; }
     overlay.style.display = 'block';
     overlay.innerHTML = '';
-    
     const box = document.createElement('div');
-    // Green if all good, yellow if some warnings, red if bad
     const isGood = result.centered && result.good_size && result.good_lighting;
-    const hasWarnings = !result.centered || !result.good_size || !result.good_lighting;
-    box.className = 'face-box ' + (isGood ? 'good' : (hasWarnings ? 'warning' : 'bad'));
-    
-    // Video is mirrored with CSS, so we need to flip the x coordinate
+    box.className = 'face-box ' + (isGood ? 'good' : 'warning');
     const video = document.getElementById('videoElement');
-    const vw = video.clientWidth;
-    const vh = video.clientHeight;
-    const vw_real = video.videoWidth;
-    const vh_real = video.videoHeight;
-    
-    // Server returns face_box with top, right, bottom, left (original coordinates)
-    // Since video is mirrored with CSS transform: scaleX(-1), we mirror the box too
+    const vw = video.clientWidth, vh = video.clientHeight;
+    const vw_real = video.videoWidth, vh_real = video.videoHeight;
     const x = vw - (result.face_box.left + (result.face_box.right - result.face_box.left)) * (vw / vw_real);
     const y = result.face_box.top * (vh / vh_real);
     const w = (result.face_box.right - result.face_box.left) * (vw / vw_real);
     const h = (result.face_box.bottom - result.face_box.top) * (vh / vh_real);
-    
-    box.style.left = x + 'px';
-    box.style.top = y + 'px';
-    box.style.width = w + 'px';
-    box.style.height = h + 'px';
-    
+    box.style.cssText = `left:${x}px;top:${y}px;width:${w}px;height:${h}px`;
     overlay.appendChild(box);
 }
 
@@ -711,10 +304,9 @@ function finishCapturePhase() {
     document.getElementById('progressOverlay').style.display = 'none';
     document.getElementById('qualityIndicators').style.display = 'none';
     document.getElementById('faceOverlay').style.display = 'none';
-    
     if (validFrames.length >= MIN_VALID_FRAMES && bestFrame) {
         registrationState = 'ready';
-        updateStageTitle(`✅ Captured ${validFrames.length} good frames. Registering...`);
+        updateStageTitle(`✅ Captured ${validFrames.length} good frames. Registering…`);
         finalizeRegistration();
     } else {
         registrationState = 'idle';
@@ -738,45 +330,27 @@ function cancelRegistration() {
     updateStageTitle('Click "Start Registration" to begin');
 }
 
-function resetToStart() {
-    cancelRegistration();
-    bestFrame = null;
-}
-
-function resetState() {
-    validFrames = [];
-    allFrames = [];
-    bestFrame = null;
-}
+function resetToStart() { cancelRegistration(); bestFrame = null; }
+function resetState() { validFrames = []; allFrames = []; bestFrame = null; }
 
 async function finalizeRegistration() {
     if (!bestFrame || registrationState !== 'ready') return;
-    
     registrationState = 'registering';
     updateButtons();
     showLoading();
-    
     try {
         const empId = {{ employee.employee_id }};
-        
-        const topFrames = validFrames
-            .sort((a, b) => b.quality - a.quality)
-            .slice(0, 5)
-            .map(f => f.imageData);
-        
+        const topFrames = validFrames.sort((a, b) => b.quality - a.quality).slice(0, 5).map(f => f.imageData);
         const payload = topFrames.length >= 2
             ? { employee_id: empId, frames: topFrames }
             : { employee_id: empId, image: bestFrame.imageData };
-        
         const response = await fetch('/face/api/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        
         const result = await response.json();
         hideLoading();
-        
         if (result.success) {
             cleanup();
             registrationState = 'idle';
@@ -802,23 +376,15 @@ async function finalizeRegistration() {
 // ─────────────────────────────────────────────────────────────────────────
 // UI HELPERS
 // ─────────────────────────────────────────────────────────────────────────
-
-function updateStageTitle(text) {
-    document.getElementById('stageTitle').textContent = text;
-}
+function updateStageTitle(text) { document.getElementById('stageTitle').textContent = text; }
 
 function updateButtons() {
     const startBtn = document.getElementById('startBtn');
-    const cancelBtnWrapper = document.getElementById('cancelBtnWrapper');
-    
+    const cancelBtn = document.getElementById('cancelBtnWrapper');
     startBtn.style.display = 'none';
-    cancelBtnWrapper.style.display = 'none';
-    
-    if (registrationState === 'idle') {
-        startBtn.style.display = 'block';
-    } else if (registrationState === 'countdown' || registrationState === 'capturing') {
-        cancelBtnWrapper.style.display = 'block';
-    }
+    cancelBtn.style.display = 'none';
+    if (registrationState === 'idle') { startBtn.style.display = 'inline-flex'; }
+    else if (registrationState === 'countdown' || registrationState === 'capturing') { cancelBtn.style.display = 'inline-flex'; }
 }
 
 function showSuccess(msg) {
@@ -828,7 +394,6 @@ function showSuccess(msg) {
     document.getElementById('errorMsg').style.display = 'none';
     document.getElementById('loadingMsg').style.display = 'none';
 }
-
 function showError(msg) {
     document.getElementById('statusMessage').style.display = 'block';
     document.getElementById('errorMsg').style.display = 'block';
@@ -836,20 +401,13 @@ function showError(msg) {
     document.getElementById('successMsg').style.display = 'none';
     document.getElementById('loadingMsg').style.display = 'none';
 }
-
 function showLoading() {
     document.getElementById('statusMessage').style.display = 'block';
     document.getElementById('loadingMsg').style.display = 'block';
     document.getElementById('successMsg').style.display = 'none';
     document.getElementById('errorMsg').style.display = 'none';
 }
-
-function hideLoading() {
-    document.getElementById('loadingMsg').style.display = 'none';
-}
-
-function hideAllMessages() {
-    document.getElementById('statusMessage').style.display = 'none';
-}
+function hideLoading() { document.getElementById('loadingMsg').style.display = 'none'; }
+function hideAllMessages() { document.getElementById('statusMessage').style.display = 'none'; }
 </script>
 {% endblock %}

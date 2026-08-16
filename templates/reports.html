@@ -51,7 +51,8 @@
   </div>
 
   {% if data.rows %}
-  <table class="tbl">
+  <div class="table-scroll reports-table-scroll" tabindex="0" aria-label="Report data table. Scroll horizontally to see all columns.">
+  <table class="tbl reports-table">
     {% if rtype=='headcount' %}
     <thead><tr><th>Department</th><th>Branch</th><th>Full-Time</th><th>Part-Time</th><th>Contract</th><th>Total</th></tr></thead>
     <tbody>
@@ -145,6 +146,7 @@
     </tbody>
     {% endif %}
   </table>
+  </div>
   <div class="text-muted" style="margin-top:12px">{{ data.rows|length }} record(s) found</div>
   {% else %}
   <div class="empty-state"><div class="icon">📊</div><h3>No data</h3><p>No records found for the selected period.</p></div>

@@ -16,22 +16,17 @@
   <div class="sec-title" style="margin-bottom:12px;">
     Payroll — {% if month %}{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][month] }} {% endif %}{{ year }}
     
-    {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+    {% if session.user_role in ['Admin','HR Manager','HR'] %}
     <div style="display:flex;gap:8px">
       <a class="btn btn-sm" href="{{ url_for('payroll.bulk_download_pdf', month=month, year=year) }}">📦 Download All (ZIP)</a>
-      <form method="POST" action="{{ url_for('payroll.generate_payroll') }}" style="display:inline">
-        <input type="hidden" name="month" value="{{ month }}">
-        <input type="hidden" name="year" value="{{ year }}">
-        <button class="btn btn-primary btn-sm" type="submit" onclick="return confirm('Regenerate payroll for all active employees for this month?');">⚙️ Regenerate Now</button>
-      </form>
     </div>
     {% endif %}
   </div>
 
   <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 14px;margin-bottom:16px;font-size:12px;color:#1e40af">
-    🔄 Draft payrolls are auto-refreshed daily with the latest attendance, bonuses, increments and
-    approved claims. Use “Regenerate Now” for an immediate manual refresh of this period.
-    Only Draft payrolls are regenerated; Finalised/Paid records are never touched.
+    🔄 Draft payrolls update automatically — approved claims are applied immediately, and
+    attendance, bonuses and increments are refreshed daily. Only Draft payrolls are
+    updated; Finalised/Paid records are never touched.
   </div>
 
   <div class="filter-panel" style="background:#f9f9fb; padding:16px; border-radius:8px; margin-bottom:20px; border:1px solid #eef1f6;">
@@ -53,7 +48,7 @@
         </div>
       </div>
       
-      {% if session.user_role in ['Admin','HR Director','HR Manager','HR','Manager'] %}
+      {% if session.user_role in ['Admin','HR Manager','HR','Manager'] %}
       <div style="display:flex; flex-direction:column; gap:4px;">
         <label style="font-size:12px; color:var(--text-secondary); font-weight:500;">Employee Name</label>
         <input type="text" name="name" class="form-input" placeholder="Search name..." value="{{ request.args.get('name', '') }}" onkeydown="if(event.key === 'Enter'){ document.getElementById('filterForm').submit(); }">
@@ -82,9 +77,9 @@
       <div style="display:flex; flex-direction:column; gap:4px;">
         <label style="font-size:12px; color:var(--text-secondary); font-weight:500;">Pay Order</label>
         <select name="pay" class="form-input" onchange="document.getElementById('filterForm').submit()">
-          <option value="">Default Order</option>
-          <option value="desc" {% if request.args.get('pay') == 'desc' %}selected{% endif %}>Highest to Lowest</option>
+          <option value="" {% if request.args.get('pay') not in ['asc', 'desc'] %}selected{% endif %}>Default</option>
           <option value="asc" {% if request.args.get('pay') == 'asc' %}selected{% endif %}>Lowest to Highest</option>
+          <option value="desc" {% if request.args.get('pay') == 'desc' %}selected{% endif %}>Highest to Lowest</option>
         </select>
       </div>
       {% endif %}
@@ -159,7 +154,7 @@
               <div style="display:flex;gap:4px">
                 <a class="btn btn-sm" href="{{ url_for('payroll.view_payslip', pid=p.payroll_id) }}" title="View Online">View</a>
                 <a class="btn btn-sm" href="{{ url_for('payroll.download_pdf', pid=p.payroll_id) }}" title="Download PDF">Download</a>
-                {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] and p.status=='Draft' %}
+                {% if session.user_role in ['Admin','HR Manager','HR'] and p.status=='Draft' %}
                 <form method="POST" action="{{ url_for('payroll.finalise', pid=p.payroll_id) }}" style="display:inline">
                   <button class="btn btn-sm btn-primary" type="submit" title="Finalise">Finalise</button>
                 </form>

@@ -16,10 +16,24 @@
   <form method="GET" action="{{ url_for('employees.list_employees') }}">
     <div class="filter-bar">
       <input class="form-input" type="text" name="q" value="{{ search }}" placeholder="Search name / email / ID" style="min-width:220px">
-      <select name="dept" class="form-input">
+      {% if session.user_role in ['Admin','HR Manager','HR'] %}
+      <select name="branch" class="form-input" id="branchFilter">
+        <option value="">Branch: All</option>
+        {% for b in branches %}
+        <option value="{{ b.branch_id }}" {% if branch_f==b.branch_id|string %}selected{% endif %}>{{ b.name }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
+      <select name="dept" class="form-input" id="deptFilter">
         <option value="">Department: All</option>
         {% for d in departments %}
-        <option value="{{ d.department_id }}" {% if dept==d.department_id|string %}selected{% endif %}>{{ d.department_name }}</option>
+        <option value="{{ d.department_id }}" data-branch="{{ d.branch_id }}" {% if dept==d.department_id|string %}selected{% endif %}>{{ d.department_name }}</option>
+        {% endfor %}
+      </select>
+      <select name="position_id" class="form-input" id="positionFilter">
+        <option value="">Position: All</option>
+        {% for p in positions %}
+        <option value="{{ p.position_id }}" data-dept="{{ p.department_id }}" {% if position_id==p.position_id|string %}selected{% endif %}>{{ p.position_name }}</option>
         {% endfor %}
       </select>
       <select name="type" class="form-input">
@@ -41,7 +55,8 @@
   </form>
 
   {% if employees %}
-  <table class="tbl">
+  <div class="table-scroll" tabindex="0" aria-label="Employee directory table. Scroll horizontally to see all columns.">
+  <table class="tbl employees-table">
     <thead>
       <tr>
         <th>Employee</th>
@@ -82,7 +97,7 @@
         <td>{{ e.hire_date }}</td>
         <td>
           <a class="btn btn-sm" href="{{ url_for('employees.view_employee', emp_id=e.employee_id) }}">View</a>
-          {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+          {% if session.user_role in ['Admin','HR Manager','HR'] %}
           <a class="btn btn-sm" href="{{ url_for('face.register_face_page', emp_id=e.employee_id) }}">Register Face</a>
           {% endif %}
         </td>
@@ -90,6 +105,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   <div class="text-muted" style="margin-top:12px">Showing {{ employees|length }} result(s)</div>
   {% else %}
   <div class="empty-state">
@@ -99,4 +115,44 @@
   </div>
   {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  var branchSel = document.getElementById('branchFilter');
+  var deptSel = document.getElementById('deptFilter');
+  var posSel = document.getElementById('positionFilter');
+  if (!deptSel) return;
+
+  function filterDepartments() {
+    if (!branchSel) return;
+    var branchId = branchSel.value;
+    var valid = false;
+    deptSel.querySelectorAll('option[data-branch]').forEach(function(opt) {
+      var show = !branchId || opt.getAttribute('data-branch') === branchId;
+      opt.style.display = show ? '' : 'none';
+      if (show && opt.selected) valid = true;
+    });
+    if (!valid && deptSel.value !== '') deptSel.value = '';
+    filterPositions();
+  }
+
+  function filterPositions() {
+    if (!posSel) return;
+    var deptId = deptSel.value;
+    var valid = false;
+    posSel.querySelectorAll('option[data-dept]').forEach(function(opt) {
+      var show = !deptId || opt.getAttribute('data-dept') === deptId;
+      opt.style.display = show ? '' : 'none';
+      if (show && opt.selected) valid = true;
+    });
+    if (!valid && posSel.value !== '') posSel.value = '';
+  }
+
+  if (branchSel) branchSel.addEventListener('change', filterDepartments);
+  deptSel.addEventListener('change', filterPositions);
+  filterDepartments();
+})();
+</script>
 {% endblock %}

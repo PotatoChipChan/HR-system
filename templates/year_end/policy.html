@@ -7,7 +7,7 @@
 <input type="hidden" name="year" value="{{ year }}">
 
 <div class="card fade-in" style="margin-bottom:24px">
-  <div class="sec-title" style="display:flex;justify-content:space-between">
+  <div class="sec-title policy-toolbar" style="display:flex;justify-content:space-between">
     <span>Increment Policy</span>
     <a class="btn btn-secondary btn-sm" href="{{ url_for('year_end.review', year=year, tab='increment') }}">Back to Year-End Review</a>
   </div>
@@ -17,7 +17,7 @@
     Eligible employees (service years ≥ tenure threshold) receive a fixed <strong>{{ '%.1f'|format(inc_policy.increment_pct) }}%</strong> increment on their base salary each year.
   </div>
 
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;align-items:end">
+  <div class="policy-fields policy-fields-four" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;align-items:end">
     <div>
       <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Increment %</label>
       <input type="number" step="0.1" name="inc_pct" value="{{ inc_policy.increment_pct }}" class="form-input" required>
@@ -44,15 +44,15 @@
 </div>
 
 <div class="card fade-in">
-  <div class="sec-title">
+  <div class="sec-title policy-toolbar">
     <span>Bonus Policy</span>
-    <form method="GET" action="{{ url_for('year_end.policy') }}" style="display:flex;gap:8px">
-      <select name="year" class="form-input" style="width:90px" onchange="this.form.submit()">
+    <div class="policy-year-picker" style="display:flex;gap:8px">
+      <select name="year" class="form-input" style="width:90px" onchange="window.location.href='{{ url_for('year_end.policy') }}?year='+encodeURIComponent(this.value)">
         {% for y in [2024,2025,2026,2027] %}
         <option value="{{ y }}" {{ 'selected' if y==year }}>{{ y }}</option>
         {% endfor %}
       </select>
-    </form>
+    </div>
   </div>
 
   <div class="info-box" style="background:var(--g50);border:1px solid var(--g200);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--text-secondary);font-size:13px">
@@ -63,7 +63,7 @@
     4. Approved bonuses are paid in the configured Payout Month.
   </div>
 
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px">
+  <div class="policy-fields policy-fields-four" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px">
     <div>
       <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Grade A (months salary)</label>
       <input type="number" step="0.1" name="grade_A_months" value="{{ bonus_policy.grade_A_months }}" class="form-input" required>
@@ -82,7 +82,7 @@
     </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:16px;align-items:end">
+  <div class="policy-fields policy-fields-three" style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:16px;align-items:end">
     <div>
       <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Min Tenure (months)</label>
       <input type="number" name="bonus_tenure" value="{{ bonus_policy.tenure_threshold_months }}" class="form-input" required>
@@ -104,7 +104,7 @@
   </div>
 </div>
 
-<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
+<div class="policy-actions" style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
   <a class="btn btn-secondary btn-sm" href="{{ url_for('year_end.review', year=year) }}">Back to Year-End Review</a>
   <button type="submit" class="btn btn-primary btn-sm">Save All Policies</button>
 </div>

@@ -42,18 +42,22 @@ def index():
 def update_profile():
     uid = session['user_id']
     f   = request.form
+    full_name = f.get('full_name', '').strip()
+    if not full_name:
+        flash('Full name is required.', 'danger')
+        return redirect(url_for('settings.index'))
     # Get current gender from database to prevent changes
     current_gender = query("SELECT gender FROM Employee WHERE employee_id=?", (uid,), one=True)['gender']
     execute("""UPDATE Employee SET full_name=?, contact_no=?, address=?,
                date_of_birth=?, gender=?, emergency_contact_name=?,
                emergency_contact_no=?, updated_at=datetime('now')
                WHERE employee_id=?""",
-            (f['full_name'], f.get('contact_no',''), f.get('address',''),
+            (full_name, f.get('contact_no',''), f.get('address',''),
              f.get('date_of_birth',''), current_gender,
              f.get('emergency_contact_name',''), f.get('emergency_contact_no',''),
              uid))
-    session['user_name'] = f['full_name']
-    session['user_initials'] = ''.join(p[0].upper() for p in f['full_name'].split()[:2])
+    session['user_name'] = full_name
+    session['user_initials'] = ''.join(p[0].upper() for p in full_name.split()[:2])
     log_audit('UPDATE', 'Settings', 'Updated own profile', 'Employee', uid)
     flash('Profile updated successfully.', 'success')
     return redirect(url_for('settings.index'))

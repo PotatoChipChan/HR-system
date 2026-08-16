@@ -11,16 +11,32 @@ from reportlab.lib.styles import getSampleStyleSheet
 rep_bp = Blueprint('reports', __name__, url_prefix='/reports')
 
 
+def _filter_int(raw, default, *, minimum=None, maximum=None):
+    """Parse an optional report filter without turning malformed URLs into 500s."""
+    if raw in (None, ''):
+        return default, True
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default, False
+    if (minimum is not None and value < minimum) or (maximum is not None and value > maximum):
+        return default, False
+    return value, True
+
+
 @rep_bp.route('/')
 @role_required('Admin', 'HR', 'Manager')
 def index():
     co    = session['company_id']
     rtype = request.args.get('type', 'headcount')
-    month_raw = request.args.get('month', '')
-    month = int(month_raw) if month_raw else 0
-    year  = int(request.args.get('year',  2026))
-    dept  = request.args.get('dept', '')
-    branch = request.args.get('branch', '')
+    month, valid_month = _filter_int(request.args.get('month', ''), 0, minimum=0, maximum=12)
+    year, valid_year = _filter_int(request.args.get('year', ''), 2026, minimum=1, maximum=9999)
+    dept_id, valid_dept = _filter_int(request.args.get('dept', ''), None, minimum=1)
+    branch_id, valid_branch = _filter_int(request.args.get('branch', ''), None, minimum=1)
+    if not all((valid_month, valid_year, valid_dept, valid_branch)):
+        flash('Invalid report filter ignored.', 'warning')
+    dept = str(dept_id) if dept_id is not None else ''
+    branch = str(branch_id) if branch_id is not None else ''
     role  = session['user_role']
     bid   = session.get('branch_id')
 
@@ -76,9 +92,9 @@ def index():
             args.append(f'{month:02d}')
         if role == 'Manager':
             sql += " AND e.branch_id=?"; args.append(bid)
-        if dept and dept != '':
+        if dept_id is not None:
             sql += " AND e.department_id=?"; args.append(int(dept))
-        if branch and branch != '' and role != 'Manager':
+        if branch_id is not None and role != 'Manager':
             sql += " AND e.branch_id=?"; args.append(int(branch))
         sql += " GROUP BY e.employee_id ORDER BY e.full_name"
         data['rows'] = query(sql, args)
@@ -102,9 +118,9 @@ def index():
             args.append(f'{month:02d}')
         if role == 'Manager':
             sql += " AND e.branch_id=?"; args.append(bid)
-        if dept and dept != '':
+        if dept_id is not None:
             sql += " AND e.department_id=?"; args.append(int(dept))
-        if branch and branch != '' and role != 'Manager':
+        if branch_id is not None and role != 'Manager':
             sql += " AND e.branch_id=?"; args.append(int(branch))
         sql += " ORDER BY a.check_in DESC"
         data['rows'] = query(sql, args)
@@ -166,7 +182,7 @@ def index():
     else:
         departments = query("SELECT d.* FROM Department d JOIN Branch b ON d.branch_id=b.branch_id WHERE b.company_id=? ORDER BY d.department_name", (co,))
         branches = query("SELECT branch_id, name FROM Branch WHERE company_id=? ORDER BY name", (co,))
-        branch = request.args.get('branch', '')
+        branch = str(branch_id) if branch_id is not None else ''
         
     log_audit('GENERATE_REPORT', 'Reports', f'Generated {rtype} report', action_details={'type': rtype, 'month': month, 'year': year})
 

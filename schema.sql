@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS Attendance (
     hours_worked     REAL,
     overtime_hours   REAL DEFAULT 0.00,
     confidence_score REAL,
-    status           TEXT DEFAULT 'Pending' CHECK(status IN ('Pending','Approved','Flagged')),
+    status           TEXT DEFAULT 'Pending' CHECK(status IN ('Pending','Approved','Rejected','Flagged')),
     is_manual_entry  INTEGER DEFAULT 0,
     manual_reason    TEXT,
     corrected_by     INTEGER,
@@ -541,7 +541,7 @@ CREATE TABLE IF NOT EXISTS Job_Posting (
     max_salary      REAL,
     description     TEXT,
     requirements    TEXT,
-    status          TEXT DEFAULT 'Open' CHECK(status IN ('Open','Closed','Filled')),
+    status          TEXT DEFAULT 'Open' CHECK(status IN ('Open','Closed','Filled','Archived')),
     target_audience TEXT NOT NULL DEFAULT 'Both'
                      CHECK(target_audience IN ('Internal','External','Both')),
     posted_by       INTEGER,
@@ -561,6 +561,8 @@ CREATE TABLE IF NOT EXISTS Job_Application (
     applicant_phone TEXT,
     applicant_ic    TEXT,
     applicant_address TEXT,
+    emergency_contact_name TEXT,
+    emergency_contact_no TEXT,
     resume_path     TEXT,
     cover_letter    TEXT,
     source          TEXT DEFAULT 'Manual' CHECK(source IN ('Email','Manual','Portal')),
@@ -568,9 +570,18 @@ CREATE TABLE IF NOT EXISTS Job_Application (
                      CHECK(applicant_type IN ('Internal','External')),
     internal_employee_id INTEGER REFERENCES Employee(employee_id),
     status          TEXT DEFAULT 'New'
-                     CHECK(status IN ('New','Shortlisted','Interview','Offered','Hired','Rejected')),
+                     CHECK(status IN ('New','Shortlisted','Interview','Offered','Hired','Rejected','Offer Expired')),
     ai_score        REAL,
     ai_summary      TEXT,
+    screening_status TEXT DEFAULT 'Scored'
+                     CHECK(screening_status IN ('Scored','Manual Review Required')),
+    matched_evidence TEXT,
+    missing_requirements TEXT,
+    scored_at       TEXT,
+    scorer_version  TEXT,
+    shortlist_override_by INTEGER REFERENCES Employee(employee_id),
+    shortlist_override_reason TEXT,
+    shortlist_override_at TEXT,
     applied_at      TEXT DEFAULT (datetime('now')),
     reviewed_by     INTEGER,
     reviewed_at     TEXT,
@@ -591,12 +602,82 @@ CREATE TABLE IF NOT EXISTS Interview (
     location        TEXT,
     meeting_link    TEXT,
     type            TEXT DEFAULT 'In-Person' CHECK(type IN ('Online','In-Person','Phone')),
+    format          TEXT CHECK(format IN ('Physical','Virtual')),
+    venue           TEXT,
+    posting_branch_id INTEGER,
     status          TEXT DEFAULT 'Scheduled'
                      CHECK(status IN ('Scheduled','Confirmed','Completed','Cancelled')),
     feedback        TEXT,
     result          TEXT CHECK(result IN ('Pass','Fail','Pending')),
     created_at      TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (application_id) REFERENCES Job_Application(application_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS Interview_Reschedule (
+    reschedule_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    interview_id     INTEGER NOT NULL,
+    old_scheduled_at TEXT NOT NULL,
+    new_scheduled_at TEXT NOT NULL,
+    reason           TEXT NOT NULL,
+    rescheduled_by   INTEGER,
+    created_at       TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (interview_id)     REFERENCES Interview(interview_id),
+    FOREIGN KEY (rescheduled_by)   REFERENCES Employee(employee_id)
+);
+
+CREATE TABLE IF NOT EXISTS Interview_Scorecard (
+    scorecard_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    interview_id       INTEGER NOT NULL UNIQUE
+                       REFERENCES Interview(interview_id) ON DELETE CASCADE,
+    technical          INTEGER NOT NULL CHECK(technical BETWEEN 1 AND 5),
+    communication      INTEGER NOT NULL CHECK(communication BETWEEN 1 AND 5),
+    fit                INTEGER NOT NULL CHECK(fit BETWEEN 1 AND 5),
+    note_technical     TEXT NOT NULL,
+    note_communication TEXT NOT NULL,
+    note_fit           TEXT NOT NULL,
+    scored_by          INTEGER REFERENCES Employee(employee_id),
+    created_at         TEXT DEFAULT (datetime('now')),
+    updated_at         TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS Candidate_Recommendation (
+    recommendation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    posting_id        INTEGER NOT NULL REFERENCES Job_Posting(posting_id) ON DELETE CASCADE,
+    application_id    INTEGER NOT NULL REFERENCES Job_Application(application_id) ON DELETE CASCADE,
+    recommended_by    INTEGER REFERENCES Employee(employee_id),
+    status            TEXT NOT NULL DEFAULT 'Pending'
+                      CHECK(status IN ('Pending','Approved','Rejected')),
+    approved_by       INTEGER REFERENCES Employee(employee_id),
+    approved_at       TEXT,
+    rejection_reason  TEXT,
+    created_at        TEXT DEFAULT (datetime('now')),
+    UNIQUE (posting_id, application_id)
+);
+
+CREATE TABLE IF NOT EXISTS Offer_Approval (
+    approval_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    contract_id      INTEGER NOT NULL UNIQUE
+                     REFERENCES Contract(contract_id) ON DELETE CASCADE,
+    status           TEXT NOT NULL DEFAULT 'Pending'
+                     CHECK(status IN ('Pending','Approved','Rejected')),
+    requested_by     INTEGER REFERENCES Employee(employee_id),
+    approved_by      INTEGER REFERENCES Employee(employee_id),
+    approved_at      TEXT,
+    rejection_reason TEXT,
+    created_at       TEXT DEFAULT (datetime('now')),
+    updated_at       TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS Email_Delivery_Log (
+    delivery_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    related_type TEXT NOT NULL,
+    related_id   INTEGER NOT NULL,
+    recipient    TEXT NOT NULL,
+    status       TEXT NOT NULL CHECK(status IN ('Sent','Failed')),
+    attempts     INTEGER NOT NULL DEFAULT 1,
+    last_error   TEXT,
+    created_at   TEXT DEFAULT (datetime('now')),
+    updated_at   TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS Contract (
@@ -614,7 +695,7 @@ CREATE TABLE IF NOT EXISTS Contract (
     contract_doc_path TEXT,
     signed_doc_path   TEXT,
     status            TEXT DEFAULT 'Draft'
-                       CHECK(status IN ('Draft','Sent','Signed','Accepted','Declined')),
+                       CHECK(status IN ('Draft','Sent','Signed','Accepted','Declined','Expired')),
     created_at        TEXT DEFAULT (datetime('now')),
     signed_at         TEXT,
     accept_token      TEXT UNIQUE,
@@ -631,7 +712,10 @@ CREATE TABLE IF NOT EXISTS scheduler_lock (
     locked_at   TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS Interview_Policy (
+CREATE TABLE IF NOT EXISTS Reschedule_Email_Processed (
+    msg_id       TEXT PRIMARY KEY,
+    processed_at TEXT DEFAULT (datetime('now'))
+);CREATE TABLE IF NOT EXISTS Interview_Policy (
     policy_id             INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id            INTEGER NOT NULL UNIQUE,
     default_duration_min  INTEGER DEFAULT 60,

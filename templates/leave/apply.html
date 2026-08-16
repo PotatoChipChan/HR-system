@@ -14,7 +14,7 @@
         <div class="leave-bal-card">
           <div class="leave-bal-val">{{ (b.entitled_days - b.used_days - b.pending_days)|round(1) }}</div>
           <div class="leave-bal-name">{{ b.type_name }}</div>
-          <div class="text-muted">{{ b.entitled_days|int }} entitled · {{ b.used_days|int }} used</div>
+          <div class="text-muted">{{ b.entitled_days|int }} entitled · {{ b.used_days|int }} used{% if b.pending_days %} · {{ b.pending_days|int }} pending{% endif %}</div>
           <div class="prog" style="margin-top:6px">
             <div class="prog-fill" style="width:{{ [100,(b.used_days/b.entitled_days*100)|int if b.entitled_days else 0]|min }}%"></div>
           </div>

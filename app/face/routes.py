@@ -13,7 +13,7 @@ try:
 except (ImportError, SystemExit):
     face_recognition = None
 from app.crypto_utils import encrypt_face_encoding, decrypt_face_encoding, is_encrypted
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import render_template, request, jsonify, session, redirect, url_for
 from app.face import face_bp
 from app.database import get_db
@@ -35,8 +35,7 @@ def login_required(f):
 
 def role_required(*roles):
     """Check if user has required role.
-    HR Manager inherits all Admin & HR permissions.
-    HR Director inherits all Admin & HR Manager & HR permissions."""
+    HR Manager inherits all Admin & HR permissions."""
     def decorator(f):
         @wraps(f)
         def decorated(*args, **kwargs):
@@ -62,8 +61,6 @@ def role_required(*roles):
             check_roles = list(roles)
             if role_name == 'HR Manager' and ('Admin' in roles or 'HR' in roles):
                 check_roles.append('HR Manager')
-            if role_name == 'HR Director' and ('Admin' in roles or 'HR Manager' in roles or 'HR' in roles):
-                check_roles.append('HR Director')
             
             if role_name not in check_roles:
                 return jsonify({'success': False, 'msg': 'Access denied. Admin or HR role required.'}), 403
@@ -126,10 +123,25 @@ _ERROR_THRESHOLD = 5
 @login_required
 @role_required('Admin', 'HR')
 def registration_list():
-    """Show list of all employees with face registration status"""
     conn = get_db()
-    
-    employees = conn.execute("""
+
+    def _safe_int(val):
+        if not val or not val.strip():
+            return None
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return None
+
+    q           = request.args.get('q', '').strip()
+    branch_id   = _safe_int(request.args.get('branch', ''))
+    dept_id_raw = _safe_int(request.args.get('dept', ''))
+
+    face_status = request.args.get('face_status', '').strip()
+    if face_status not in ('registered', 'not_registered'):
+        face_status = ''
+
+    sql = """
         SELECT
             e.employee_id,
             e.full_name,
@@ -143,10 +155,69 @@ def registration_list():
         JOIN Department d ON e.department_id = d.department_id
         JOIN Branch b ON e.branch_id = b.branch_id
         LEFT JOIN Face_Encoding fe ON e.employee_id = fe.employee_id
-        ORDER BY e.full_name
+        WHERE 1=1
+    """
+    params = []
+
+    if q:
+        sql += " AND (e.full_name LIKE ? OR e.email LIKE ?)"
+        params.extend([f'%{q}%', f'%{q}%'])
+
+    if branch_id is not None:
+        sql += " AND e.branch_id = ?"
+        params.append(branch_id)
+
+    dept_id = None
+    if dept_id_raw is not None:
+        if branch_id is not None:
+            dept_row = conn.execute(
+                "SELECT branch_id FROM Department WHERE department_id = ?",
+                (dept_id_raw,)
+            ).fetchone()
+            if dept_row and dept_row['branch_id'] == branch_id:
+                dept_id = dept_id_raw
+        else:
+            dept_row = conn.execute(
+                "SELECT 1 FROM Department WHERE department_id = ?",
+                (dept_id_raw,)
+            ).fetchone()
+            if dept_row:
+                dept_id = dept_id_raw
+
+    if dept_id is not None:
+        sql += " AND e.department_id = ?"
+        params.append(dept_id)
+
+    if face_status == 'registered':
+        sql += " AND fe.encoding_id IS NOT NULL"
+    elif face_status == 'not_registered':
+        sql += " AND fe.encoding_id IS NULL"
+
+    sql += " ORDER BY e.full_name"
+
+    employees = conn.execute(sql, params).fetchall()
+
+    branches = conn.execute(
+        "SELECT branch_id, name FROM Branch ORDER BY name"
+    ).fetchall()
+
+    departments = conn.execute("""
+        SELECT d.department_id, d.department_name, d.branch_id, b.name AS branch_name
+        FROM Department d
+        JOIN Branch b ON d.branch_id = b.branch_id
+        ORDER BY b.name, d.department_name
     """).fetchall()
-    
-    return render_template('face/registration_list.html', employees=employees)
+
+    return render_template(
+        'face/registration_list.html',
+        employees=employees,
+        branches=branches,
+        departments=departments,
+        q=q,
+        selected_branch=branch_id,
+        selected_dept=dept_id,
+        selected_face_status=face_status
+    )
 
 
 @face_bp.route('/register/<int:emp_id>', methods=['GET'])
@@ -517,16 +588,10 @@ def face_attendance_page():
         (emp_id,)
     ).fetchone()
 
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    today_record = conn.execute("""
-        SELECT check_in, check_out
-        FROM Attendance
-        WHERE employee_id = ? AND date(check_in) = date(?)
-        ORDER BY check_in DESC LIMIT 1
-    """, (emp_id, now_str)).fetchone()
+    open_record = _open_checkin_record(emp_id)
 
-    is_checked_in = today_record is not None and today_record['check_out'] is None
-    last_check_in = today_record['check_in'] if today_record else None
+    is_checked_in = open_record is not None
+    last_check_in = open_record['check_in'] if open_record else None
 
     if not employee:
         return redirect(url_for('auth.login'))
@@ -596,7 +661,7 @@ def api_health():
         _consecutive_errors += 1
         if _consecutive_errors >= _ERROR_THRESHOLD:
             send_notification_to_role(
-                ['Admin', 'HR Director', 'HR Manager', 'HR'],
+                ['Admin', 'HR Manager', 'HR'],
                 'Face Recognition System Error',
                 f'Health check failed. face_recognition: {fr_ok}, DB: {db_ok}, consecutive errors: {_consecutive_errors}',
                 type='Error'
@@ -605,7 +670,7 @@ def api_health():
         _system_healthy = True
         _consecutive_errors = 0
         send_notification_to_role(
-            ['Admin', 'HR Director', 'HR Manager', 'HR'],
+            ['Admin', 'HR Manager', 'HR'],
             'Face Recognition System Restored',
             'The system is healthy again.',
             type='Success'
@@ -645,30 +710,11 @@ def api_match_and_record():
             return jsonify({'success': False, 'msg': 'Invalid action'}), 400
         
         emp_id = session.get('user_id')
-        
-        conn = get_db()
-        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        today_record = conn.execute("""
-            SELECT attendance_id, check_in, check_out
-            FROM Attendance
-            WHERE employee_id = ? AND date(check_in) = date(?)
-            ORDER BY check_in DESC LIMIT 1
-        """, (emp_id, now_str)).fetchone()
-        
-        is_checked_in = today_record is not None and today_record['check_out'] is None
-        
-        # For check-out, also look for an open check-in from yesterday (cross-midnight)
-        if requested_action == 'check_out' and not is_checked_in:
-            cross_record = conn.execute("""
-                SELECT attendance_id, check_in, check_out
-                FROM Attendance
-                WHERE employee_id = ? AND date(check_in) = date(?, '-1 day') AND check_out IS NULL
-                ORDER BY check_in DESC LIMIT 1
-            """, (emp_id, now_str)).fetchone()
-            if cross_record:
-                is_checked_in = True
-                today_record = cross_record
-        
+
+        open_record = _open_checkin_record(emp_id)
+
+        is_checked_in = open_record is not None
+
         if requested_action == 'check_in' and is_checked_in:
             return jsonify({
                 'success': False,
@@ -749,7 +795,7 @@ def api_match_and_record():
             if _consecutive_errors >= _ERROR_THRESHOLD and _system_healthy:
                 _system_healthy = False
                 send_notification_to_role(
-                    ['Admin', 'HR Director', 'HR Manager', 'HR'],
+                    ['Admin', 'HR Manager', 'HR'],
                     'Face Recognition System Error',
                     f'Failed to record attendance after face match. consecutive errors: {_consecutive_errors}',
                     type='Error'
@@ -760,7 +806,7 @@ def api_match_and_record():
         if not _system_healthy:
             _system_healthy = True
             send_notification_to_role(
-                ['Admin', 'HR Director', 'HR Manager', 'HR'],
+                ['Admin', 'HR Manager', 'HR'],
                 'Face Recognition System Restored',
                 'Attendance recorded successfully after recovery.',
                 type='Success'
@@ -779,7 +825,7 @@ def api_match_and_record():
         if _consecutive_errors >= _ERROR_THRESHOLD and _system_healthy:
             _system_healthy = False
             send_notification_to_role(
-                ['Admin', 'HR Director', 'HR Manager', 'HR'],
+                ['Admin', 'HR Manager', 'HR'],
                 'Face Recognition System Error',
                 f'Exception in match_and_record: {str(e)}',
                 type='Error'
@@ -789,6 +835,26 @@ def api_match_and_record():
             'msg': f'Error: {str(e)}'
         }), 500
 
+def _open_checkin_record(emp_id):
+    """Most recent open Attendance row (check_out IS NULL) for today,
+    otherwise yesterday, otherwise None. Local-time based; never looks
+    further back than yesterday."""
+    conn = get_db()
+    now = datetime.now()
+    today = now.strftime('%Y-%m-%d')
+    yesterday = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+    for day in (today, yesterday):
+        row = conn.execute("""
+            SELECT attendance_id, check_in, check_out
+            FROM Attendance
+            WHERE employee_id = ? AND date(check_in) = ? AND check_out IS NULL
+            ORDER BY check_in DESC LIMIT 1
+        """, (emp_id, day)).fetchone()
+        if row:
+            return row
+    return None
+
+
 def record_attendance(emp_id, confidence_score=0, action='check_in'):
     """Record face-verified check-in or check-out with confidence score."""
     try:
@@ -796,25 +862,10 @@ def record_attendance(emp_id, confidence_score=0, action='check_in'):
         now_str = now.strftime('%Y-%m-%d %H:%M:%S')
         conn = get_db()
         
-        last_record = conn.execute("""
-            SELECT attendance_id, check_in, check_out
-            FROM Attendance
-            WHERE employee_id = ? AND date(check_in) = date(?)
-            ORDER BY check_in DESC LIMIT 1
-        """, (emp_id, now_str)).fetchone()
-        
-        if action == 'check_out' and (not last_record or last_record['check_out'] is not None):
-            cross_record = conn.execute("""
-                SELECT attendance_id, check_in, check_out
-                FROM Attendance
-                WHERE employee_id = ? AND date(check_in) = date(?, '-1 day') AND check_out IS NULL
-                ORDER BY check_in DESC LIMIT 1
-            """, (emp_id, now_str)).fetchone()
-            if cross_record:
-                last_record = cross_record
+        open_record = _open_checkin_record(emp_id)
         
         if action == 'check_in':
-            if last_record and last_record['check_out'] is None:
+            if open_record:
                 return None
             conn.execute("""
                 INSERT INTO Attendance 
@@ -828,9 +879,9 @@ def record_attendance(emp_id, confidence_score=0, action='check_in'):
                 'msg': f'✅ Checked in at {now.strftime("%H:%M:%S")} — Confidence: {confidence_score*100:.1f}%'
             }
         else:
-            if not last_record or last_record['check_out'] is not None:
+            if not open_record:
                 return None
-            check_in_dt = datetime.fromisoformat(last_record['check_in'])
+            check_in_dt = datetime.fromisoformat(open_record['check_in'])
             hours_worked = round((now - check_in_dt).total_seconds() / 3600, 2)
             emp_sched = conn.execute(
                 "SELECT work_start_time, work_end_time FROM Employee WHERE employee_id = ?",
@@ -848,7 +899,7 @@ def record_attendance(emp_id, confidence_score=0, action='check_in'):
                 SET check_out = ?, hours_worked = ?, overtime_hours = ?,
                     confidence_score = ?, status = 'Approved'
                 WHERE attendance_id = ?
-            """, (now_str, hours_worked, ot, confidence_score, last_record['attendance_id']))
+            """, (now_str, hours_worked, ot, confidence_score, open_record['attendance_id']))
             conn.commit()
             return {
                 'action': 'check_out',

@@ -71,7 +71,7 @@
         <div class="ai-panel" style="margin-bottom:12px; display: flex; align-items: center; justify-content: space-between; transition: all 0.3s;" id="ai-panel">
           <div>
             <div class="ai-tag">🤖 AI OCR Engine</div>
-            <p style="font-size:12px;margin-top:4px" id="ai-status">Auto-extract data from your invoice image using Tesseract AI.</p>
+            <p style="font-size:12px;margin-top:4px" id="ai-status">Auto-extract data from your invoice file using the OCR engine.</p>
           </div>
           <button type="button" class="btn btn-sm btn-primary" id="btn-ocr" style="flex-shrink:0;">✨ Auto-fill</button>
         </div>
@@ -96,6 +96,7 @@
       </div>
     </div>
     {% if invoices %}
+        <div class="table-scroll" tabindex="0" aria-label="Invoice submissions table. Scroll horizontally to see all columns.">
         <table class="tbl">
           <thead><tr><th>Invoice #</th><th>Vendor</th><th>Amount</th><th>Date</th><th>Status</th></tr></thead>
           <tbody>
@@ -120,6 +121,7 @@
             {% endfor %}
           </tbody>
         </table>
+        </div>
     {% else %}
     <div class="empty-state"><div class="icon">🧾</div><p>No invoices found</p></div>
     {% endif %}
@@ -153,7 +155,7 @@ document.querySelectorAll('.money-input').forEach(function(input) {
 document.getElementById('btn-ocr').addEventListener('click', async function() {
   const fileInput = document.getElementById('inv-file');
   if (!fileInput.files.length) {
-    alert('Please select an invoice image first.');
+    alert('Please select an invoice file first.');
     return;
   }
   

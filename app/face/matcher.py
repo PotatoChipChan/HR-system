@@ -41,7 +41,7 @@ class FaceMatcherCache:
                        e.branch_id, e.department_id, f.face_encoding_blob
                 FROM Face_Encoding f
                 JOIN Employee e ON f.employee_id = e.employee_id
-                WHERE e.employment_status = 'Active'
+                WHERE e.is_active = 1
                 ORDER BY e.employee_id
             """).fetchall()
             conn.close()

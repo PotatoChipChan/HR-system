@@ -23,7 +23,7 @@
     <div class="btn-row" style="margin-top:16px">
       <button class="btn btn-primary" id="btn-in" {% if not can_check_in %}disabled{% endif %}>Check In</button>
       <button class="btn btn-primary" id="btn-out" {% if not can_check_out %}disabled{% endif %}>Check Out</button>
-      {% if session.user_role in ['Admin','HR Director','HR Manager'] %}
+      {% if session.user_role in ['Admin','HR Manager'] %}
       <button class="btn" id="btn-reg">Register Face</button>
       {% endif %}
     </div>

@@ -5,30 +5,11 @@
 <div class="card fade-in">
   <form method="POST">
     <div class="form-row">
-      <div class="form-group"><label class="label">Department*</label>
-        <select class="form-input" name="department_id" id="department_id" onchange="filterPositions()" required>
-          <option value="">Select department</option>
-          {% for d in departments %}
-          <option value="{{ d.department_id }}">{{ d.department_name }} ({{ d.branch_name }})</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="form-group"><label class="label">Job Title*</label>
-        <select class="form-input" name="position_id" id="position_id" required>
-          <option value="">Select position</option>
-          {% for p in positions %}
-          <option value="{{ p.position_id }}" data-dept="{{ p.department_id }}">{{ p.position_name }}</option>
-          {% endfor %}
-        </select>
-        <p style="font-size:12px;color:#888;margin-top:4px">New titles must first be added to the Position Catalog (Roles &amp; Permissions).</p>
-      </div>
-    </div>
-    <div class="form-row">
       <div class="form-group"><label class="label">Branch*</label>
-        <select class="form-input" name="branch_id" required>
+        <select class="form-input" name="branch_id" id="branch_id" onchange="filterDepartments()" required>
           <option value="">Select branch</option>
           {% for b in branches %}
-          <option value="{{ b.branch_id }}">{{ b.name }}</option>
+          <option value="{{ b.branch_id }}" {{ 'selected' if prefill_branch == b.branch_id|string }}>{{ b.name }}</option>
           {% endfor %}
         </select>
       </div>
@@ -41,6 +22,28 @@
       </div>
     </div>
     <div class="form-row">
+      <div class="form-group"><label class="label">Department*</label>
+        <select class="form-input" name="department_id" id="department_id" onchange="filterPositions()" required>
+          <option value="">Select department</option>
+          {% for d in departments %}
+          <option value="{{ d.department_id }}" data-branch="{{ d.branch_id }}" {{ 'selected' if prefill_department == d.department_id|string }}>{{ d.department_name }} ({{ d.branch_name }})</option>
+          {% endfor %}
+        </select>
+        <a id="department-empty-cta" class="btn btn-sm btn-primary" hidden style="margin-top:6px"
+           href="{{ url_for('organization.add_department') }}">+ Add a department for this branch</a>
+      </div>
+      <div class="form-group"><label class="label">Job Title*</label>
+        <select class="form-input" name="position_id" id="position_id" required>
+          <option value="">Select position</option>
+          {% for p in positions %}
+          <option value="{{ p.position_id }}" data-dept="{{ p.department_id }}" {{ 'selected' if prefill_position == p.position_id|string }}>{{ p.position_name }}</option>
+          {% endfor %}
+        </select>
+        <a id="position-empty-cta" class="btn btn-sm btn-primary" hidden style="margin-top:6px"
+           href="{{ url_for('organization.add_position') }}">+ Add a position title for this department</a>
+      </div>
+    </div>
+    <div class="form-row">
       <div class="form-group"><label class="label">Target Audience</label>
         <select class="form-input" name="target_audience">
           {% for v in audience_values %}
@@ -48,11 +51,14 @@
           {% endfor %}
         </select>
       </div>
-      <div class="form-group"><label class="label">&nbsp;</label></div>
+      <div class="form-group"><label class="label">Number of Openings*</label>
+        <input class="form-input" type="number" name="openings" min="1" max="50" value="1" required>
+        <p class="hint" style="color:#888;font-size:12px;margin-top:6px">How many people does this posting need? The posting stays open until all approved openings are filled.</p>
+      </div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label class="label">Min Salary</label><input class="form-input" name="min_salary" type="number" step="0.01"></div>
-      <div class="form-group"><label class="label">Max Salary</label><input class="form-input" name="max_salary" type="number" step="0.01"></div>
+      <div class="form-group"><label class="label">Min Salary</label><input class="form-input" name="min_salary" type="number" min="0" step="0.01"></div>
+      <div class="form-group"><label class="label">Max Salary</label><input class="form-input" name="max_salary" type="number" min="0" step="0.01"></div>
     </div>
     <div class="form-group"><label class="label">Description</label><textarea class="form-input" name="description" rows="4"></textarea></div>
     <div class="form-group"><label class="label">Requirements</label><textarea class="form-input" name="requirements" rows="4"></textarea></div>
@@ -63,15 +69,60 @@
 
 {% block scripts %}
 <script>
+  function filterDepartments() {
+    var branchId = document.getElementById('branch_id').value;
+    var deptSel = document.getElementById('department_id');
+    var visible = 0;
+    deptSel.querySelectorAll('option').forEach(function(opt) {
+      if (!opt.value) return;
+      var show = (!branchId || opt.getAttribute('data-branch') === branchId);
+      opt.style.display = show ? "" : "none";
+      opt.disabled = !show;
+      if (show) visible += 1;
+    });
+    if (deptSel.value && deptSel.selectedOptions[0].style.display === "none") {
+      deptSel.value = "";
+    }
+    var departmentCta = document.getElementById('department-empty-cta');
+    if (departmentCta) {
+      var showDepartmentCta = branchId && visible === 0;
+      departmentCta.hidden = !showDepartmentCta;
+      if (showDepartmentCta) {
+        var departmentReturn = '{{ url_for('recruitment.add_posting') }}?branch_id='
+          + encodeURIComponent(branchId);
+        departmentCta.href = '{{ url_for('organization.add_department') }}?branch_id='
+          + encodeURIComponent(branchId) + '&return_to=' + encodeURIComponent(departmentReturn);
+      }
+    }
+    filterPositions();
+  }
+
   function filterPositions() {
     var deptId = document.getElementById('department_id').value;
     var sel = document.getElementById('position_id');
-    var options = sel.querySelectorAll('option');
-    options.forEach(function(opt) {
+    var visible = 0;
+    sel.querySelectorAll('option').forEach(function(opt) {
       if (!opt.value) return;
-      opt.style.display = (!deptId || opt.getAttribute('data-dept') === deptId) ? "" : "none";
+      var show = (!deptId || opt.getAttribute('data-dept') === deptId);
+      opt.style.display = show ? "" : "none";
+      opt.disabled = !show;
+      if (show) visible += 1;
     });
     if (sel.value && sel.selectedOptions[0].style.display === "none") sel.value = "";
+    var cta = document.getElementById('position-empty-cta');
+    if (cta) {
+      var showCta = deptId && visible === 0;
+      cta.hidden = !showCta;
+      if (showCta) {
+        var branchId = document.getElementById('branch_id').value;
+        var positionReturn = '{{ url_for('recruitment.add_posting') }}?branch_id='
+          + encodeURIComponent(branchId) + '&department_id=' + encodeURIComponent(deptId);
+        cta.href = '{{ url_for('organization.add_position') }}?branch_id='
+          + encodeURIComponent(branchId) + '&department_id=' + encodeURIComponent(deptId)
+          + '&return_to=' + encodeURIComponent(positionReturn);
+      }
+    }
   }
+  document.addEventListener('DOMContentLoaded', filterDepartments);
 </script>
 {% endblock %}

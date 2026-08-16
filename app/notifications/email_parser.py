@@ -47,6 +47,8 @@ def try_structured_body(body):
         'ic': r'(?i)^(?:IC|IC Number|NRIC|MyKad|Identity Card)\s*:\s*(.+?)\s*$',
         'phone': r'(?i)^(?:Phone|Contact|Mobile|Contact Number|Phone Number)\s*:\s*(.+?)\s*$',
         'address': r'(?i)^(?:Address|Home Address|Current Address)\s*:\s*(.+?)\s*$',
+        'emergency_contact_name': r'(?i)^(?:Emergency Contact Name|EC Name|Next of Kin Name)\s*:\s*(.+?)\s*$',
+        'emergency_contact_no': r'(?i)^(?:Emergency Contact (?:No|Number|Phone|Contact)|EC (?:No|Number|Phone|Contact))\s*:\s*(.+?)\s*$',
     }
 
     lines = body.split('\n')
@@ -166,10 +168,12 @@ def try_body_regex(body):
 def parse_application_email(subject, body, from_header):
     result = {
         'name': None,
-        'email': extract_email(from_header),
+        'email': None,
         'phone': None,
         'ic': None,
         'address': None,
+        'emergency_contact_name': None,
+        'emergency_contact_no': None,
         'position_raw': None,
         'posting_ref': None,
         'confidence': 0.0,
@@ -190,6 +194,9 @@ def parse_application_email(subject, body, from_header):
                 result['position_raw'] = info['position_raw']
         if not result.get('name'):
             result['name'] = parse_name_from_header(from_header)
+        # Sender address is only a fallback when the template omits Email:
+        if not result.get('email'):
+            result['email'] = extract_email(from_header)
         result['confidence'] = 1.0
         return result
 
@@ -197,6 +204,7 @@ def parse_application_email(subject, body, from_header):
     info = try_subject_template(subject)
     if info:
         result.update(info)
+        result['email'] = extract_email(from_header)
         result['confidence'] = 1.0
         return result
 
@@ -224,6 +232,9 @@ def parse_application_email(subject, body, from_header):
         result['name'] = parse_name_from_header(from_header)
         if result['name']:
             result['confidence'] = max(result['confidence'], 0.3)
+
+    if result['email'] is None:
+        result['email'] = extract_email(from_header)
 
     return result
 
@@ -404,3 +415,34 @@ def is_auto_reply(msg):
         return True
 
     return False
+
+
+def detect_reschedule_request(subject, body):
+    """Heuristic: does this email ask to reschedule/postpone an interview?
+
+    Intent-only signal; the email monitor never mutates an interview from
+    an email. Reschedule requests surface as a manual-review notification.
+    """
+    text = '%s\n%s' % ((subject or ''), (body or ''))
+    text = text.lower()
+    intent = any(w in text for w in ('reschedule', 're-schedule', 'postpone'))
+    return intent and 'interview' in text
+
+
+INTERVIEW_REF_RE = re.compile(r'\bINT-(\d+)\b', re.IGNORECASE)
+
+
+def extract_interview_ref(subject, body):
+    """Extract an interview reference (INT-<id>) from a reply, if retained.
+
+    Returns the interview_id as int, or None. Used to match a reschedule
+    request to the exact interview the candidate means.
+    """
+    text = '%s\n%s' % ((subject or ''), (body or ''))
+    m = INTERVIEW_REF_RE.search(text)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except (TypeError, ValueError):
+        return None

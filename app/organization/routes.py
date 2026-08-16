@@ -1,6 +1,7 @@
 """app/organization/routes.py – Company / Branch / Department / Role management"""
 import os
 import uuid
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from flask import (
     Blueprint, render_template, request, redirect,
     url_for, session, flash, send_from_directory, current_app
@@ -16,6 +17,31 @@ org_bp = Blueprint('organization', __name__, url_prefix='/organization')
 # ----------------------------------------------------------------------
 def _get_company_id():
     return session.get('company_id')
+
+
+_WORKFLOW_RETURN_PATHS = {
+    '/recruitment/postings/add',
+    '/organization/roles/positions/add',
+}
+
+
+def _workflow_return_url(raw_url, **prefill):
+    """Return an internal, approved setup destination with new selections.
+
+    Organisation setup forms can call one another (for example, a posting
+    needs a new department, then a catalog position).  Only these two known
+    destinations are accepted, so form-controlled query parameters cannot
+    create an open redirect.
+    """
+    if not raw_url:
+        return None
+    parsed = urlsplit(raw_url)
+    if parsed.scheme or parsed.netloc or parsed.path not in _WORKFLOW_RETURN_PATHS:
+        return None
+    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    params.update({key: str(value) for key, value in prefill.items()
+                   if value not in (None, '')})
+    return urlunsplit(('', '', parsed.path, urlencode(params), ''))
 
 def _get_managers_for_company(company_id):
     return query("""
@@ -45,8 +71,8 @@ def index():
 @role_required('Admin', 'HR')
 def companies():
     """List companies with branch and employee counts."""
-    # For Admin/HR Manager/HR Director: show all companies; for HR: show only their own company
-    if session.get('user_role') in ('Admin', 'HR Manager', 'HR Director'):
+    # Admin and HR Manager see all companies; HR sees only their own company.
+    if session.get('user_role') in ('Admin', 'HR Manager'):
         rows = query("""
             SELECT
                 c.*,
@@ -184,8 +210,8 @@ def branches():
     """List branches, optionally filtered by company (Admin only)."""
     company_id = request.args.get('company_id', type=int)
 
-    # If not Admin/HR Manager/HR Director, force to own company
-    if session.get('user_role') not in ('Admin', 'HR Manager', 'HR Director'):
+    # If not Admin/HR Manager, force to own company.
+    if session.get('user_role') not in ('Admin', 'HR Manager'):
         company_id = _get_company_id()
 
     if company_id:
@@ -216,7 +242,7 @@ def branches():
 
     # For Admin filter dropdown: all companies
     companies = []
-    if session.get('user_role') in ('Admin', 'HR Manager', 'HR Director'):
+    if session.get('user_role') in ('Admin', 'HR Manager'):
         companies = query("SELECT company_id, name FROM Company ORDER BY name")
 
     return render_template('organization/branch_list.html',
@@ -286,10 +312,16 @@ def add_branch():
         )
         log_audit('CREATE', 'Organization', f'Added branch "{name}"', 'Branch', bid)
         flash(f'Branch "{name}" added successfully.', 'success')
+        return_to = _workflow_return_url(f.get('return_to'), branch_id=bid)
+        if return_to:
+            return redirect(return_to)
+        if f.get('continue_setup') == 'department':
+            return redirect(url_for('organization.add_department', branch_id=bid,
+                                    continue_setup='1'))
         return redirect(url_for('organization.branches'))
 
     # GET: populate dropdowns
-    if session.get('user_role') in ('Admin', 'HR Manager', 'HR Director'):
+    if session.get('user_role') in ('Admin', 'HR Manager'):
         companies = query("SELECT company_id, name FROM Company ORDER BY name")
     else:
         co = _get_company_id()
@@ -301,7 +333,8 @@ def add_branch():
                            branch=None,
                            companies=companies,
                            employees=employees,
-                           parent_branches=parent_branches)
+                           parent_branches=parent_branches,
+                           return_to=_workflow_return_url(request.args.get('return_to', '')) or '')
 
 
 @org_bp.route('/branch/<int:bid>/edit', methods=['GET', 'POST'])
@@ -483,8 +516,8 @@ def departments():
 
     departments = [dict(row) for row in rows]
 
-    # For filter dropdown: show branches (Admin/HR Manager/HR Director see all, HR sees only own company's branches)
-    if session.get('user_role') in ('Admin', 'HR Manager', 'HR Director'):
+    # For filter dropdown: Admin/HR Manager see all, HR sees only own company's branches.
+    if session.get('user_role') in ('Admin', 'HR Manager'):
         branches = query("SELECT branch_id, name FROM Branch ORDER BY name")
     else:
         co = _get_company_id()
@@ -504,21 +537,26 @@ def add_department():
         f = request.form
         branch_id = f.get('branch_id')
         dept_name = f.get('department_name', '').strip()
+        return_to = f.get('return_to', '')
+        continue_setup = f.get('continue_setup') == '1'
+        back = url_for('organization.add_department', branch_id=branch_id or '',
+                       return_to=return_to or None,
+                       continue_setup='1' if continue_setup else None)
         if not branch_id or not dept_name:
             flash('Branch and Department Name are required.', 'danger')
-            return redirect(url_for('organization.add_department'))
+            return redirect(back)
         if len(dept_name) < 2 or len(dept_name) > 100:
             flash('Department name must be 2-100 characters.', 'danger')
-            return redirect(url_for('organization.add_department'))
+            return redirect(back)
             
         # Check that the branch belongs to the HR's company (or admin)
         branch = query("SELECT company_id FROM Branch WHERE branch_id=?", (branch_id,), one=True)
         if not branch:
             flash('Invalid branch.', 'danger')
-            return redirect(url_for('organization.add_department'))
+            return redirect(back)
         if session.get('user_role') == 'HR' and branch['company_id'] != _get_company_id():
             flash('You cannot add a department to a branch outside your company.', 'danger')
-            return redirect(url_for('organization.add_department'))
+            return redirect(back)
 
         dept_mgr = f.get('department_manager_id')
         dept_mgr = int(dept_mgr) if dept_mgr else None
@@ -527,18 +565,28 @@ def add_department():
                         (dept_mgr,), one=True)
             if not mgr or mgr['branch_id'] != int(branch_id):
                 flash('The selected department manager does not belong to the selected branch.', 'danger')
-                return redirect(url_for('organization.add_department'))
+                return redirect(back)
         did = execute("INSERT INTO Department (branch_id, department_name, department_manager_id) VALUES (?,?,?)",
                       (branch_id, dept_name, dept_mgr))
         log_audit('CREATE', 'Organization', f'Added department "{dept_name}"', 'Department', did)
         flash(f'Department "{dept_name}" added.', 'success')
+        workflow_return = _workflow_return_url(return_to, branch_id=branch_id,
+                                                department_id=did)
+        if workflow_return:
+            return redirect(workflow_return)
+        if continue_setup:
+            return redirect(url_for('organization.add_position', branch_id=branch_id,
+                                    department_id=did, continue_setup='1'))
         return redirect(url_for('organization.departments'))
 
     # GET: list branches and managers for the company
     co = _get_company_id()
     branches = query("SELECT branch_id, name FROM Branch WHERE company_id=? ORDER BY name", (co,))
     managers = _get_managers_for_company(co)
-    return render_template('organization/department_form.html', department=None, branches=branches, managers=managers)
+    return render_template('organization/department_form.html', department=None, branches=branches, managers=managers,
+                           prefill_branch=request.args.get('branch_id', ''),
+                           return_to=_workflow_return_url(request.args.get('return_to', '')) or '',
+                           continue_setup=request.args.get('continue_setup') == '1')
 
 
 @org_bp.route('/department/<int:did>/edit', methods=['GET', 'POST'])
@@ -613,7 +661,7 @@ def delete_department(did):
 # ======================================================================
 @org_bp.route('/roles')
 @login_required
-@role_required('Admin', 'HR', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR', 'HR Manager')
 def roles():
     """List roles with employee counts, dept manager assignments and the
     position catalog (predefined job titles per department)."""
@@ -622,26 +670,37 @@ def roles():
                COUNT(e.employee_id) as employee_count
         FROM Role r
         LEFT JOIN Employee e ON r.role_id = e.role_id AND e.is_active=1
+        WHERE r.role_name != 'HR Director'
         GROUP BY r.role_id
         ORDER BY r.role_id
     """)
     roles = [dict(row) for row in rows]
 
     dept_managers = query("""
-        SELECT d.department_name, b.name AS branch_name,
+        SELECT d.department_id, d.department_name, b.name AS branch_name,
                e.employee_id, e.full_name AS manager_name,
                COALESCE(p.position_name, e.position) AS position_name,
                r.role_name
         FROM Department d
         JOIN Branch b ON d.branch_id = b.branch_id
-        JOIN Employee e ON d.department_manager_id = e.employee_id
-        JOIN Role r ON e.role_id = r.role_id
+        LEFT JOIN Employee e ON d.department_manager_id = e.employee_id
+        LEFT JOIN Role r ON e.role_id = r.role_id
         LEFT JOIN Position p ON e.position_id = p.position_id
         ORDER BY b.name, d.department_name
     """)
 
+    empty_departments = query("""
+        SELECT d.department_id, d.department_name, b.name AS branch_name
+        FROM Department d
+        JOIN Branch b ON d.branch_id = b.branch_id
+        LEFT JOIN Position p ON p.department_id = d.department_id AND p.is_active = 1
+        GROUP BY d.department_id
+        HAVING COUNT(p.position_id) = 0
+        ORDER BY b.name, d.department_name
+    """)
+
     positions = query("""
-        SELECT p.*, d.department_name, b.name AS branch_name,
+        SELECT p.*, d.department_name, b.branch_id AS branch_id, b.name AS branch_name,
                (SELECT COUNT(*) FROM Employee e WHERE e.position_id=p.position_id) AS emp_count,
                (SELECT COUNT(*) FROM Job_Posting jp WHERE jp.position_id=p.position_id) AS posting_count
         FROM Position p
@@ -654,10 +713,13 @@ def roles():
         FROM Department d JOIN Branch b ON d.branch_id=b.branch_id
         ORDER BY d.department_name
     """)
+    position_branches = query("SELECT branch_id, name FROM Branch ORDER BY name")
 
     return render_template('organization/role_list.html',
                            roles=roles, dept_managers=dept_managers,
-                           positions=positions, departments=departments)
+                           positions=positions, departments=departments,
+                           position_branches=position_branches,
+                           empty_departments=empty_departments)
 
 
 def _normalize_position_name(name):
@@ -665,37 +727,69 @@ def _normalize_position_name(name):
     return ' '.join(name.split())
 
 
-@org_bp.route('/roles/positions/add', methods=['POST'])
-@role_required('Admin', 'HR', 'HR Manager', 'HR Director')
+@org_bp.route('/roles/positions/add', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin', 'HR', 'HR Manager')
 def add_position():
+    if request.method == 'GET':
+        branches = query("SELECT branch_id, name FROM Branch ORDER BY name")
+        departments = query("""
+            SELECT d.*, b.name AS branch_name
+            FROM Department d JOIN Branch b ON d.branch_id=b.branch_id
+            ORDER BY b.name, d.department_name
+        """)
+        return render_template('organization/add_position.html',
+                               branches=branches, departments=departments,
+                               prefill_branch=request.args.get('branch_id', ''),
+                               prefill_department=request.args.get('department_id', ''),
+                               prefill_name=request.args.get('position_name', ''),
+                               return_to=_workflow_return_url(request.args.get('return_to', '')) or '',
+                               continue_setup=request.args.get('continue_setup') == '1')
+
     name = _normalize_position_name(request.form.get('position_name', ''))
     dept_id = request.form.get('department_id')
+    back = url_for('organization.add_position',
+                   position_name=name,
+                   department_id=dept_id or '',
+                   branch_id=request.form.get('branch_id', ''),
+                   return_to=request.form.get('return_to', '') or None,
+                   continue_setup='1' if request.form.get('continue_setup') == '1' else None)
     if not name or not dept_id:
         flash('Position name and department are required.', 'danger')
-        return redirect(url_for('organization.roles'))
+        return redirect(back)
     try:
         dept_id = int(dept_id)
     except (TypeError, ValueError):
         flash('Invalid department.', 'danger')
-        return redirect(url_for('organization.roles'))
+        return redirect(back)
 
     exists = query("""SELECT position_id FROM Position
                       WHERE department_id=? AND LOWER(position_name)=LOWER(?)""",
                    (dept_id, name), one=True)
     if exists:
         flash(f'Position "{name}" already exists in this department.', 'warning')
-        return redirect(url_for('organization.roles'))
+        return redirect(back)
 
-    execute("INSERT INTO Position(position_name, department_id) VALUES(?,?)", (name, dept_id))
+    pid = execute("INSERT INTO Position(position_name, department_id) VALUES(?,?)", (name, dept_id))
     log_audit('CREATE_POSITION', 'Organization',
               f'Added position "{name}" to department {dept_id}',
               'Position', None, action_details={'position_name': name, 'department_id': dept_id})
     flash(f'Position "{name}" added to the catalog.', 'success')
+    workflow_return = _workflow_return_url(request.form.get('return_to', ''),
+                                            branch_id=request.form.get('branch_id', ''),
+                                            department_id=dept_id, position_id=pid)
+    if workflow_return:
+        return redirect(workflow_return)
+    if request.form.get('continue_setup') == '1':
+        return redirect(url_for('employees.add_employee',
+                                branch_id=request.form.get('branch_id', ''),
+                                department_id=dept_id, position_id=pid,
+                                setup_branch_manager='1'))
     return redirect(url_for('organization.roles'))
 
 
 @org_bp.route('/roles/positions/<int:pid>/rename', methods=['POST'])
-@role_required('Admin', 'HR', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR', 'HR Manager')
 def rename_position(pid):
     name = _normalize_position_name(request.form.get('position_name', ''))
     pos = query("SELECT * FROM Position WHERE position_id=?", (pid,), one=True)
@@ -715,20 +809,4 @@ def rename_position(pid):
     log_audit('RENAME_POSITION', 'Organization',
               f'Renamed position {pid} to "{name}"', 'Position', pid)
     flash('Position renamed.', 'success')
-    return redirect(url_for('organization.roles'))
-
-
-@org_bp.route('/roles/positions/<int:pid>/toggle', methods=['POST'])
-@role_required('Admin', 'HR', 'HR Manager', 'HR Director')
-def toggle_position(pid):
-    pos = query("SELECT is_active FROM Position WHERE position_id=?", (pid,), one=True)
-    if not pos:
-        flash('Position not found.', 'danger')
-        return redirect(url_for('organization.roles'))
-    new_state = 0 if pos['is_active'] else 1
-    execute("UPDATE Position SET is_active=? WHERE position_id=?", (new_state, pid))
-    log_audit('TOGGLE_POSITION', 'Organization',
-              f'Position {pid} {"deactivated" if new_state==0 else "reactivated"}',
-              'Position', pid)
-    flash('Position ' + ('deactivated' if new_state == 0 else 'reactivated') + '.', 'success')
     return redirect(url_for('organization.roles'))

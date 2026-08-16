@@ -18,13 +18,16 @@
       {{ url_for('organization.add_department') }}
     {%- endif %}
   ">
+    {% if return_to %}<input type="hidden" name="return_to" value="{{ return_to }}">{% endif %}
+    {% if continue_setup %}<input type="hidden" name="continue_setup" value="1">{% endif %}
     <div class="form-row">
       <div class="form-group"><label class="label">Branch <span style="color:#a32d2d">*</span></label>
         <select class="form-input" name="branch_id" required>
           <option value="">Select a branch</option>
           {% for b in branches %}
             <option value="{{ b.branch_id }}"
-              {%- if department and department.branch_id == b.branch_id %} selected{% endif %}>
+              {%- if (department and department.branch_id == b.branch_id)
+                     or (not department and prefill_branch == b.branch_id|string) %} selected{% endif %}>
               {{ b.name }}
             </option>
           {% endfor %}
@@ -52,8 +55,8 @@
     </div>
 
     <div style="margin-top:16px">
-      <button class="btn btn-primary" type="submit">Save Department</button>
-      <a href="{{ url_for('organization.departments') }}" class="btn">Cancel</a>
+      <button class="btn btn-primary" type="submit">{{ 'Save Department & Add Position' if continue_setup else 'Save Department' }}</button>
+      <a href="{{ return_to or url_for('organization.departments') }}" class="btn">Cancel</a>
     </div>
   </form>
 </div>

@@ -63,21 +63,116 @@ def execute(sql, args=()):
     return cur.lastrowid
 
 
+def _reject_active_candidates(posting_id, exclude_application_id, job_title):
+    """Reject the remaining active candidates of a posting.
+
+    Called when all approved openings are filled. Rejection emails are sent
+    per candidate; failures are isolated. Audit event is written once."""
+    others = query("""
+        SELECT application_id, applicant_name, applicant_email
+        FROM Job_Application
+        WHERE posting_id=? AND application_id!=?
+          AND status IN ('New','Shortlisted','Interview','Offered')
+    """, (posting_id, exclude_application_id))
+    if not others:
+        return
+
+    try:
+        uid = session.get('user_id')
+    except Exception:
+        uid = None
+    from flask import render_template
+    for o in others:
+        execute("""
+            UPDATE Job_Application SET status='Rejected', reviewed_by=?,
+                   reviewed_at=datetime('now')
+            WHERE application_id=?
+        """, (uid, o['application_id']))
+        if o['applicant_email']:
+            try:
+                from app.notifications.email_service import send_email
+                html = render_template('emails/application_rejected.html',
+                    employee_name=o['applicant_name'],
+                    title='Application Update',
+                    job_title=job_title)
+                send_email(f'Application Status – {job_title}', o['applicant_email'], html)
+            except Exception as e:
+                print(f"[OPENING FILL] Rejection email failed for {o['application_id']}: {e}")
+
+    try:
+        log_audit('AUTO_REJECT_CANDIDATES', 'Recruitment',
+                  f'Auto-rejected {len(others)} candidate(s) for posting #{posting_id} '
+                  'after all approved openings were filled',
+                  action_details={'posting_id': posting_id,
+                                  'hired_aid': exclude_application_id,
+                                  'rejected_count': len(others)})
+    except Exception as e:
+        print(f"[OPENING FILL] Audit log failed: {e}")
+
+
 def close_job_posting_for_application(application_id):
-    """Mark the related job posting as filled once a candidate is hired."""
+    """Fill one approved opening for the application's posting.
+
+    Backward-compatible name: the function no longer closes a posting on the
+    first hire. Instead it performs opening accounting:
+      - ensures a Filled Opening_Reservation row exists for the application
+      - increments Job_Posting.filled_openings
+      - updates the posting status: Open / Partially Filled / Archived
+        (a fully filled posting is archived automatically - soft deleted)
+      - when filled_openings == approved_openings, the remaining active
+        candidates are rejected (emails + audit)
+
+    Returns True when a posting was updated, False otherwise."""
     posting = query("""
-        SELECT ja.posting_id
-        FROM Job_Application ja
+        SELECT ja.posting_id FROM Job_Application ja
         WHERE ja.application_id=?
     """, (application_id,), one=True)
     if not posting or not posting['posting_id']:
         return False
+    pid = posting['posting_id']
 
-    execute("""
-        UPDATE Job_Posting
-        SET status='Filled', closed_at=datetime('now')
-        WHERE posting_id=? AND status != 'Filled'
-    """, (posting['posting_id'],))
+    jp = query("""
+        SELECT jp.*, b.company_id FROM Job_Posting jp
+        JOIN Branch b ON jp.branch_id=b.branch_id
+        WHERE jp.posting_id=?
+    """, (pid,), one=True)
+    if not jp:
+        return False
+
+    approved = int(jp['approved_openings'] or 1)
+    filled = int(jp['filled_openings'] or 0)
+
+    active = query("""
+        SELECT reservation_id FROM Opening_Reservation
+        WHERE application_id=? AND status IN ('Reserved','Filled')
+        LIMIT 1
+    """, (application_id,), one=True)
+    if active:
+        execute("UPDATE Opening_Reservation SET status='Filled' WHERE reservation_id=?",
+                (active['reservation_id'],))
+    else:
+        execute("""INSERT INTO Opening_Reservation (posting_id, application_id, status)
+                   VALUES (?,?,'Filled')""", (pid, application_id))
+
+    new_filled = min(filled + 1, approved)
+    if new_filled >= approved:
+        # Fully filled postings are auto-archived (soft deleted): they leave
+        # the active and closed lists while every record is preserved.
+        new_status = 'Archived'
+        execute("""UPDATE Job_Posting SET filled_openings=?, status=?,
+                          closed_at=COALESCE(closed_at, datetime('now'))
+                   WHERE posting_id=?""", (new_filled, new_status, pid))
+    elif new_filled > 0:
+        new_status = 'Partially Filled'
+        execute("""UPDATE Job_Posting SET filled_openings=?, status=?
+                   WHERE posting_id=?""", (new_filled, new_status, pid))
+    else:
+        new_status = 'Open'
+        execute("""UPDATE Job_Posting SET filled_openings=?, status=?
+                   WHERE posting_id=?""", (new_filled, new_status, pid))
+
+    if new_filled >= approved:
+        _reject_active_candidates(pid, application_id, jp['title'])
     return True
 
 

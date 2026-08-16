@@ -21,8 +21,7 @@ def login_required(f):
 
 def role_required(*roles):
     """Allow access only to users whose role is in the given list.
-    HR Manager inherits all Admin & HR permissions.
-    HR Director inherits all Admin & HR Manager & HR permissions."""
+    HR Manager inherits all Admin & HR permissions."""
     def decorator(f):
         @wraps(f)
         def decorated(*args, **kwargs):
@@ -32,8 +31,6 @@ def role_required(*roles):
             check_roles = list(roles)
             if user_role == 'HR Manager' and ('Admin' in roles or 'HR' in roles):
                 check_roles.append('HR Manager')
-            if user_role == 'HR Director' and ('Admin' in roles or 'HR Manager' in roles or 'HR' in roles):
-                check_roles.append('HR Director')
             if user_role not in check_roles:
                 flash('You do not have permission to access that page.', 'danger')
                 return redirect(url_for('main.dashboard'))

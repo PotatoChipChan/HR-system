@@ -116,7 +116,7 @@
   <div class="card">
     <div class="sec-title">
       Company Info
-      {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+      {% if session.user_role in ['Admin','HR Manager','HR'] %}
       <a class="sec-link" href="{{ url_for('organization.index') }}">Manage Org →</a>
       {% endif %}
     </div>

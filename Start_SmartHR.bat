@@ -1,25 +1,37 @@
 @echo off
 cd /d "%~dp0"
-SETLOCAL EnableDelayedExpansion
+SETLOCAL EnableExtensions EnableDelayedExpansion
+set "PYTHONPATH="
 
 :: ── Check Python ──────────────────────────────────────────────────
 python --version >nul 2>&1
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo [ERROR] Python is not installed or not in PATH.
     echo Please install Python 3.10+ from https://python.org
     pause
-    exit /b
+    exit /b 1
 )
 
 :: ── Run setup if venv is missing or broken ────────────────────────
+:check_venv
 ".venv\Scripts\python.exe" --version >nul 2>&1
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo [INFO] Virtual environment missing or broken. Running setup...
     call Setup_SmartHR.bat
-    if %errorlevel% neq 0 (
+    if errorlevel 1 (
+        echo [ERROR] Setup did not complete. SmartHR was not started.
         pause
-        exit /b
+        exit /b 1
     )
+    goto check_venv
+)
+
+:: ── Check application source before showing the launch menu ───────
+if not exist "app\__init__.py" (
+    echo [ERROR] SmartHR application files are missing: app\__init__.py
+    echo Restore the project source files, then run Start_SmartHR.bat again.
+    pause
+    exit /b 1
 )
 
 :: ── Detect IP ────────────────────────────────────────────────────

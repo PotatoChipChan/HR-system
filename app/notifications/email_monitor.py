@@ -11,7 +11,7 @@ from app.database import query, execute, log_audit
 from app.notifications.email_parser import (
     parse_application_email, detect_offer_reply, extract_contract_id,
     is_application_email, is_auto_reply, is_promotional_email, extract_email,
-    extract_posting_ref
+    extract_posting_ref, detect_reschedule_request
 )
 
 MAX_EMAILS_PER_POLL = 10
@@ -145,6 +145,13 @@ def create_application_from_email(msg, parsed):
             print(f"[EMAIL MONITOR] Skipping already-processed email (Message-ID: {msg_id})")
             return None
 
+    # Emergency contact columns for applications submitted via the template
+    for col in ('emergency_contact_name', 'emergency_contact_no'):
+        try:
+            execute(f"ALTER TABLE Job_Application ADD COLUMN {col} TEXT")
+        except Exception:
+            pass  # column already exists
+
     posting = None
     # Priority 1: Exact posting reference from mailto: footer
     posting_ref = parsed.get('posting_ref') or extract_posting_ref(body)
@@ -153,7 +160,7 @@ def create_application_from_email(msg, parsed):
             SELECT jp.posting_id, jp.title, jp.branch_id, b.name as branch_name
             FROM Job_Posting jp
             JOIN Branch b ON jp.branch_id=b.branch_id
-            WHERE jp.posting_id=? AND jp.status='Open'
+            WHERE jp.posting_id=? AND jp.status IN ('Open','Partially Filled')
         """, (posting_ref,), one=True)
         if posting:
             print(f"[EMAIL MONITOR] Matched application to posting #{posting_ref} via Ref tag")
@@ -166,7 +173,7 @@ def create_application_from_email(msg, parsed):
             SELECT jp.posting_id, jp.title, jp.branch_id, b.name as branch_name
             FROM Job_Posting jp
             JOIN Branch b ON jp.branch_id=b.branch_id
-            WHERE ? LIKE '%' || lower(jp.title) || '%' AND jp.status='Open'
+            WHERE ? LIKE '%' || lower(jp.title) || '%' AND jp.status IN ('Open','Partially Filled')
         """, (position_str,))
         if matches:
             if len(matches) == 1:
@@ -181,7 +188,7 @@ def create_application_from_email(msg, parsed):
                             SELECT jp.posting_id, jp.title, jp.branch_id, b.name as branch_name
                             FROM Job_Posting jp
                             JOIN Branch b ON jp.branch_id=b.branch_id
-                            WHERE lower(jp.title) LIKE ? AND jp.status='Open'
+                            WHERE lower(jp.title) LIKE ? AND jp.status IN ('Open','Partially Filled')
                         """, (f"%{w}%",))
                         if sub_matches:
                             if len(sub_matches) == 1:
@@ -197,20 +204,26 @@ def create_application_from_email(msg, parsed):
     os.makedirs(resume_dir, exist_ok=True)
 
     applicant_name = (parsed.get('name') or '').strip() or email_addr
+    # The application template's Email field wins over the sender address, so
+    # applications sent from a third-party account still record the candidate.
+    applicant_email = (parsed.get('email') or '').strip() or email_addr
 
     app_id = execute("""
         INSERT INTO Job_Application
         (posting_id, applicant_name, applicant_email, applicant_phone,
          applicant_ic, applicant_address,
+         emergency_contact_name, emergency_contact_no,
          cover_letter, source, status, message_id)
-        VALUES (?,?,?,?,?,?,?,'Email','New',?)
+        VALUES (?,?,?,?,?,?,?,?,?,'Email','New',?)
     """, (
         posting['posting_id'] if posting else None,
         applicant_name,
-        email_addr,
+        applicant_email,
         parsed.get('phone'),
         parsed.get('ic'),
         parsed.get('address'),
+        parsed.get('emergency_contact_name'),
+        parsed.get('emergency_contact_no'),
         (body[:10000] if body else '') + ('\n\n---\n[Full email body truncated]' if body and len(body) > 10000 else ''),
         msg_id or None,
     ))
@@ -228,7 +241,7 @@ def create_application_from_email(msg, parsed):
     except Exception as e:
         print(f"[EMAIL MONITOR] Audit log failed: {e}")
 
-    # Auto AI shortlisting
+    # Auto AI shortlisting and screening
     if posting:
         try:
             posting_data = query("""
@@ -241,21 +254,15 @@ def create_application_from_email(msg, parsed):
                     FROM Job_Application WHERE application_id=?
                 """, (app_id,), one=True)
                 if app_data:
-                    app_data = dict(app_data)
-                    if app_data.get('cover_letter') and len(app_data['cover_letter'].strip()) > 100:
-                        from app.recruitment.scorer import score_applications
-                        results = score_applications(posting_data, [app_data], app_root=current_app.root_path)
-                    if results and results[0]['score'] > 60:
-                        execute("""
-                            UPDATE Job_Application
-                            SET status='Shortlisted', ai_score=?, ai_summary=?
-                            WHERE application_id=?
-                        """, (results[0]['score'], results[0]['summary'], app_id))
-                        print(f"[EMAIL MONITOR] Auto-shortlisted app {app_id} (score: {results[0]['score']})")
+                    from app.recruitment.scorer import score_and_persist
+                    result = score_and_persist(app_id, posting_data, dict(app_data),
+                                               app_root=current_app.root_path)
+                    if result and result.get('is_shortlisted'):
+                        print(f"[EMAIL MONITOR] Auto-shortlisted app {app_id} (score: {result['score']})")
+                    elif result:
+                        print(f"[EMAIL MONITOR] App {app_id} scored {result['score']} — below threshold")
                     else:
-                        score = results[0]['score'] if results else 0
-                        execute("UPDATE Job_Application SET ai_score=? WHERE application_id=?", (score, app_id))
-                        print(f"[EMAIL MONITOR] App {app_id} scored {score} — below threshold")
+                        print(f"[EMAIL MONITOR] App {app_id} screening not scored")
         except Exception as e:
             print(f"[EMAIL MONITOR] AI scoring failed: {e}")
 
@@ -298,7 +305,7 @@ def surface_offer_reply(contract_id, intent, msg=None):
         if contract['company_id']:
             send_in_app_to_company(
                 contract['company_id'],
-                ('Admin', 'HR', 'HR Manager', 'HR Director'),
+                ('Admin', 'HR', 'HR Manager'),
                 f'Offer {intent.title()} via Email',
                 f'{contract["applicant_name"]} replied with a {intent} for offer #{contract_id} '
                 f'via email. Complete the action using the secure acceptance link or HR actions.',
@@ -340,6 +347,102 @@ def _build_search_criteria():
     # Always search last 7 days; dedup prevents duplicate processing
     since_date = (datetime.now() - timedelta(days=7)).strftime('%d-%b-%Y')
     return f'(SINCE {since_date})'
+
+
+def surface_reschedule_request(from_hdr, subject, body, msg_id=None):
+    """Surface a candidate interview-reschedule request for manual HR review.
+
+    Only ever creates an in-app notification -- interviews are never mutated
+    by email.
+
+    Resolution (never guesses):
+      1. If the reply retains the invitation's INT-<id> reference and that
+         interview belongs to the sender's applications, the notification
+         names that exact interview.
+      2. Otherwise a generic notification lists every upcoming interview for
+         the sender's applications so HR can choose the right one.
+      3. A sender with no upcoming interviews gets no notification.
+
+    Deduplication is persistent: the Message-ID is stored in SQLite
+    (Reschedule_Email_Processed), so a server restart cannot re-notify for
+    the same message within the scan window. Returns True when a
+    notification was created.
+    """
+    if not msg_id:
+        return False
+    from datetime import datetime as _dt
+    try:
+        exists = query(
+            "SELECT 1 FROM Reschedule_Email_Processed WHERE msg_id=?", (msg_id,), one=True)
+        if exists:
+            return False
+        execute("INSERT INTO Reschedule_Email_Processed (msg_id, processed_at) VALUES (?, datetime('now'))",
+                (msg_id,))
+        # Housekeeping: drop rows far beyond the 7-day scan window.
+        execute("DELETE FROM Reschedule_Email_Processed WHERE processed_at < datetime('now','-30 days')")
+    except Exception as e:
+        print(f"[EMAIL MONITOR] Reschedule dedup failed: {e}")
+        return False
+
+    import re
+    m = re.search(r'[\w.+-]+@[\w-]+\.[\w.]+', from_hdr or '')
+    if not m:
+        return False
+    sender = m.group(0).lower()
+
+    upcoming = query("""
+        SELECT i.interview_id, i.scheduled_at, jp.title as job_title,
+               ja.applicant_name, ja.company_id
+        FROM Job_Application ja
+        JOIN Interview i ON i.application_id = ja.application_id
+        LEFT JOIN Job_Posting jp ON ja.posting_id = jp.posting_id
+        WHERE lower(ja.applicant_email)=?
+          AND i.status IN ('Scheduled','Confirmed')
+          AND i.scheduled_at >= datetime('now')
+        ORDER BY i.scheduled_at ASC
+    """, (sender,))
+    if not upcoming:
+        return False
+    company_id = upcoming[0]['company_id']
+    applicant_name = upcoming[0]['applicant_name']
+
+    from app.notifications.email_parser import extract_interview_ref
+    ref = extract_interview_ref(subject, body)
+    matched = None
+    if ref is not None:
+        for u in upcoming:
+            if u['interview_id'] == ref:
+                matched = u
+                break
+
+    if matched is not None:
+        message = ('%s asked to reschedule interview INT-%d (%s, %s). '
+                   'Manual review required.'
+                   % (applicant_name, matched['interview_id'],
+                      matched['job_title'] or 'position',
+                      matched['scheduled_at'][:16]))
+    else:
+        parts = ['%s asked to reschedule an interview. Upcoming interviews: '
+                 % applicant_name]
+        parts.append('; '.join(
+            'INT-%d (%s, %s)' % (u['interview_id'], u['job_title'] or 'position',
+                                 u['scheduled_at'][:16]) for u in upcoming))
+        parts.append('Select the correct interview to reschedule — manual review required.')
+        message = ' '.join(parts)
+
+    try:
+        from app.notifications.routes import send_in_app_to_company
+        send_in_app_to_company(
+            company_id,
+            ('Admin', 'HR', 'HR Manager'),
+            'Interview Reschedule Request',
+            message,
+            type='Info',
+            related_url='/recruitment/interviews')
+    except Exception as e:
+        print(f"[EMAIL MONITOR] Reschedule notification failed: {e}")
+        return False
+    return True
 
 
 def poll_inbox():
@@ -412,6 +515,13 @@ def poll_inbox():
                 elif intent == 'decline':
                     if surface_offer_reply(contract_id, 'decline', msg):
                         new_declines += 1
+                continue
+
+            # Candidate interview-reschedule requests: manual-review
+            # notification only; interviews are never changed from email.
+            if not is_application_email(subject, body) and detect_reschedule_request(subject, body):
+                if surface_reschedule_request(from_hdr, subject, body, msg.get('Message-ID')):
+                    print(f"[EMAIL MONITOR] Reschedule request surfaced for manual review: {from_hdr}")
                 continue
 
             # Skip replies/forwards (they aren't new applications)

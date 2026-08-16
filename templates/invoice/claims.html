@@ -25,7 +25,8 @@
     </div>
   </div>
   {% if invoices %}
-        <table class="tbl">
+        <div class="table-scroll" tabindex="0" aria-label="Claims table. Scroll horizontally to see all columns.">
+        <table class="tbl claims-table">
           <thead><tr><th>Employee</th><th>Invoice #</th><th>Vendor</th><th>Amount</th><th>Status</th><th>Action</th><th></th></tr></thead>
           <tbody>
             {% for i in invoices %}
@@ -60,6 +61,7 @@
             {% endfor %}
           </tbody>
         </table>
+        </div>
   {% else %}
   <div class="empty-state"><div class="icon">🧾</div><p>No claims found</p></div>
   {% endif %}

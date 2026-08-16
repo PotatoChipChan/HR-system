@@ -59,10 +59,26 @@ def apply():
 
     if request.method == 'POST':
         f   = request.form
-        lt_id = int(f['leave_type_id'])
-        start = f['start_date']
-        end   = f['end_date']
+        try:
+            lt_id = int(f.get('leave_type_id', ''))
+            start = f.get('start_date', '')
+            end = f.get('end_date', '')
+            sd = datetime.date.fromisoformat(start)
+            ed = datetime.date.fromisoformat(end)
+        except (TypeError, ValueError):
+            flash('Select a valid leave type, start date, and end date.', 'danger')
+            return redirect(url_for('leave.apply'))
         reason = f.get('reason', '')
+
+        # Recheck that the requested leave type exists and is eligible. This
+        # keeps crafted form submissions from reaching the balance/insert path.
+        selected_lt = as_dict(query("SELECT * FROM Leave_Type WHERE leave_type_id=?", (lt_id,), one=True))
+        if not selected_lt:
+            flash('Select a valid leave type.', 'danger')
+            return redirect(url_for('leave.apply'))
+        if not is_leave_eligible(selected_lt, emp_gender, emp_marital):
+            flash('You are not eligible to apply for this leave type.', 'danger')
+            return redirect(url_for('leave.apply'))
 
         # Handle file upload
         attachment = request.files.get('attachment')
@@ -78,8 +94,6 @@ def apply():
             attachment.save(os.path.join(leave_upload, saved_fn))
 
         # Calculate working days
-        sd = datetime.date.fromisoformat(start)
-        ed = datetime.date.fromisoformat(end)
         if sd > ed:
             flash('End date must be after start date.', 'danger')
             return redirect(url_for('leave.apply'))
@@ -90,13 +104,6 @@ def apply():
             flash('Selected dates fall on weekends only.', 'danger')
             return redirect(url_for('leave.apply'))
         
-        # Recheck eligibility for the selected leave type
-        selected_lt = as_dict(query("SELECT * FROM Leave_Type WHERE leave_type_id=?", (lt_id,), one=True))
-        if selected_lt:
-            if not is_leave_eligible(selected_lt, emp_gender, emp_marital):
-                flash('You are not eligible to apply for this leave type.', 'danger')
-                return redirect(url_for('leave.apply'))
-
         # Check for overlapping leaves on same date
         overlap = query("""
             SELECT COUNT(*) as cnt FROM Leave_Application
@@ -110,7 +117,7 @@ def apply():
         # Check balance
         bal = query("SELECT * FROM Leave_Balance WHERE employee_id=? AND leave_type_id=? AND year=?",
                     (uid, lt_id, yr), one=True)
-        lt  = query("SELECT * FROM Leave_Type WHERE leave_type_id=?", (lt_id,), one=True)
+        lt = selected_lt
 
         if bal:
             available = bal['entitled_days'] - bal['used_days'] - bal['pending_days']
@@ -206,6 +213,11 @@ def approve(lid):
         flash('Leave application not found.', 'danger')
         return redirect(url_for('leave.approve_list'))
 
+    # Prevent self-approval: an approver cannot approve their own leave.
+    if la['employee_id'] == uid:
+        flash('You cannot approve or reject your own leave application. Another approver must review it.', 'danger')
+        return redirect(url_for('leave.approve_list'))
+
     # Manager branch check
     if session['user_role'] == 'Manager':
         emp_branch = query("""
@@ -224,16 +236,14 @@ def approve(lid):
         WHERE leave_id=?
     """, (uid, uid, lid))
 
-    # Move pending → used, update employment_status if needed
+    # Move pending → used.  Employment status is a durable employment state;
+    # whether someone is away today is derived from approved leave dates by
+    # the dashboard/profile rather than being changed when leave is approved.
     execute("""UPDATE Leave_Balance
                SET used_days=used_days+?, pending_days=MAX(0,pending_days-?)
                WHERE employee_id=? AND leave_type_id=? AND year=?""",
             (la['total_days'], la['total_days'],
              la['employee_id'], la['leave_type_id'], yr))
-
-    # If employee currently active, set On Leave for the period
-    execute("UPDATE Employee SET employment_status='On Leave' WHERE employee_id=? AND employment_status='Active'",
-            (la['employee_id'],))
 
     log_audit('APPROVE', 'Leave', f'Approved leave application LV-{lid}',
               'Leave_Application', lid, 'Success', {'days': la['total_days']})
@@ -254,6 +264,11 @@ def reject(lid):
     la      = query("SELECT * FROM Leave_Application WHERE leave_id=?", (lid,), one=True)
     if not la:
         flash('Leave application not found.', 'danger')
+        return redirect(url_for('leave.approve_list'))
+
+    # Prevent self-rejection: an approver cannot reject their own leave.
+    if la['employee_id'] == uid:
+        flash('You cannot approve or reject your own leave application. Another approver must review it.', 'danger')
         return redirect(url_for('leave.approve_list'))
 
     # Manager branch check
@@ -318,7 +333,7 @@ def download_attachment(lid):
         abort(404)
     uid = session['user_id']
     role = session['user_role']
-    if uid != la['employee_id'] and role not in ('Admin', 'HR', 'HR Manager', 'HR Director', 'Manager'):
+    if uid != la['employee_id'] and role not in ('Admin', 'HR', 'HR Manager', 'Manager'):
         abort(403)
     return send_from_directory(
         os.path.join(current_app.config['UPLOAD_FOLDER'], 'leave'),

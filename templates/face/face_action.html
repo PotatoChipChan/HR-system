@@ -16,7 +16,7 @@
   <p style="font-size:13px;margin:8px 0 12px;">
     Face verification failed {{ failed_attempts }} time(s). You can record your {% if is_checked_in %}check-out{% else %}check-in{% endif %} manually.
   </p>
-  {% set is_elevated = session.user_role in ['Admin','HR Director','HR Manager','HR','Manager'] %}
+  {% set is_elevated = session.user_role in ['Admin','HR Manager','HR','Manager'] %}
   {% if is_elevated %}
   <a href="{{ url_for('attendance.manual') }}" class="btn btn-primary">📝 Go to Manual Attendance</a>
   {% else %}
@@ -94,7 +94,7 @@
       </div>
     </div>
 
-    {% set is_admin = session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+    {% set is_admin = session.user_role in ['Admin','HR Manager','HR'] %}
     {% if is_admin %}
     <div class="card" style="margin-top:16px">
       <div class="sec-title">Admin Panel</div>
@@ -360,8 +360,9 @@ btnAction.onclick = async () => {
 
   const ok = await startCamera();
   if (!ok) {
-    faceAttempts++;
-    if (faceAttempts >= MAX_ATTEMPTS) { window.location.href = MANUAL_URL; return; }
+    const report = await reportCaptureFailure();
+    faceAttempts = report.failed_attempts;
+    if (report.redirect_url) return;
     recording = false;
     btnAction.disabled = false;
     btnAction.textContent = 'Record Attendance';

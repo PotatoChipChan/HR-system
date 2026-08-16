@@ -1,10 +1,36 @@
 """AI-powered application scorer using multi-factor analysis."""
+import json
 import re, os
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 
-STOP_WORDS = set(stopwords.words('english'))
+try:
+    STOP_WORDS = set(stopwords.words('english'))
+except LookupError:
+    # The NLTK corpus is data, not a Python dependency, and may be absent in
+    # a fresh local/test environment. Keep the scorer available with a stable
+    # English fallback; installations with the corpus retain NLTK's list.
+    STOP_WORDS = {
+        'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'being', 'by',
+        'for', 'from', 'has', 'have', 'he', 'her', 'hers', 'him', 'his',
+        'i', 'in', 'is', 'it', 'its', 'me', 'my', 'of', 'on', 'or', 'our',
+        'she', 'that', 'the', 'their', 'them', 'they', 'this', 'to', 'was',
+        'we', 'were', 'will', 'with', 'you', 'your'
+    }
 STEMMER = PorterStemmer()
+
+# Version of the scoring algorithm; stored per application so re-runs of the
+# algorithm can be distinguished from historical results.
+SCORER_VERSION = '1.0'
+
+# Minimum evidence thresholds before a score is considered meaningful.
+MIN_COVER_LETTER_CHARS = 100
+MIN_RESUME_CHARS = 50
+
+# Applications with a match score strictly above this threshold are
+# auto-shortlisted. Single source of truth for the Applications-page
+# explanation card and the scoring logic itself.
+SHORTLIST_THRESHOLD = 60
 
 # Broad skill keywords commonly found in resumes
 SKILL_KEYWORDS = {
@@ -92,6 +118,11 @@ def score_applications(posting, applications, app_root=None):
             'score': 0,
             'summary': 'No job requirements to match against.',
             'is_shortlisted': False,
+            'evidence_ok': True,
+            'evidence_detail': 'not evaluated (no posting requirements)',
+            'matched_evidence': {'keywords': [], 'skills': []},
+            'missing_requirements': [],
+            'scorer_version': SCORER_VERSION,
         } for a in applications]
 
     posting_keywords = set(_preprocess(posting_text).split())
@@ -150,7 +181,11 @@ def score_applications(posting, applications, app_root=None):
             shown = sorted(matched_skills)[:5]
             summary_parts.append(f"Skills: {', '.join(shown)}")
         summary = '. '.join(summary_parts) if summary_parts else 'No significant match found.'
-        is_shortlisted = score > 60
+        is_shortlisted = score > SHORTLIST_THRESHOLD
+
+        has_cl = bool(a.get('cover_letter') and len(a['cover_letter'].strip()) > MIN_COVER_LETTER_CHARS)
+        has_resume = bool(resume_text and len(resume_text.strip()) > MIN_RESUME_CHARS)
+        evidence_ok = has_cl or has_resume
 
         results.append({
             'application_id': a['application_id'],
@@ -158,7 +193,81 @@ def score_applications(posting, applications, app_root=None):
             'score': score,
             'summary': summary,
             'is_shortlisted': is_shortlisted,
+            'evidence_ok': evidence_ok,
+            'evidence_detail': ('cover letter + resume' if has_cl and has_resume
+                                else 'cover letter' if has_cl
+                                else 'resume' if has_resume else 'none'),
+            'matched_evidence': {
+                'keywords': sorted(matched_keywords)[:10],
+                'skills': sorted(matched_skills)[:10],
+            },
+            'missing_requirements': sorted(posting_keywords - app_keywords)[:10],
+            'scorer_version': SCORER_VERSION,
         })
 
     results.sort(key=lambda x: x['score'], reverse=True)
     return results
+
+
+def score_and_persist(application_id, posting_data, app_data, app_root=None):
+    """AI-score a single application and persist the screening result.
+
+    Writes ai_score, ai_summary, status, screening_status, matched_evidence,
+    missing_requirements, scored_at and scorer_version to the application row.
+
+    - Sufficient evidence (cover letter > MIN_COVER_LETTER_CHARS chars or a
+      readable resume): screening_status='Scored'; status becomes
+      'Shortlisted' when score > 60, otherwise stays 'New'.
+    - Insufficient evidence: screening_status='Manual Review Required',
+      status stays 'New' and ai_score is left NULL (no meaningless score).
+    - AI never rejects a candidate.
+
+    Returns the scorer result dict, or None when scoring could not run.
+    """
+    from app.database import query, execute
+    results = score_applications(posting_data, [app_data], app_root=app_root)
+    if not results:
+        execute("""UPDATE Job_Application
+                   SET screening_status='Manual Review Required',
+                       missing_requirements='Scoring failed to run',
+                       scored_at=datetime('now'), scorer_version=?
+                   WHERE application_id=?""",
+                (SCORER_VERSION, application_id))
+        return None
+
+    r = results[0]
+    if r.get('evidence_ok'):
+        screening = 'Scored'
+        status = 'Shortlisted' if r['score'] > SHORTLIST_THRESHOLD else 'New'
+        score = r['score']
+    else:
+        screening = 'Manual Review Required'
+        status = 'New'
+        score = None
+
+    execute("""UPDATE Job_Application
+               SET ai_score=?, ai_summary=?, status=?, screening_status=?,
+                   matched_evidence=?, missing_requirements=?,
+                   scored_at=datetime('now'), scorer_version=?
+               WHERE application_id=?""",
+            (score, r['summary'], status, screening,
+             json.dumps(r.get('matched_evidence') or {}),
+             json.dumps(r.get('missing_requirements') or []),
+             SCORER_VERSION, application_id))
+    return r
+
+
+def screening_rule_info():
+    """Return the auto-shortlisting rule for the Applications-page banner.
+
+    Derived from the constants this module actually uses, so the UI
+    explanation cannot drift from the scoring logic. Informational only.
+    """
+    return {
+        'threshold': SHORTLIST_THRESHOLD,
+        'min_cover_letter_chars': MIN_COVER_LETTER_CHARS,
+        'min_resume_chars': MIN_RESUME_CHARS,
+        'weights': 'Keyword coverage 50% + relevant skills 30% + content depth 20%',
+        'formula': 'Shortlisted = eligible application AND match score > %d'
+                   % SHORTLIST_THRESHOLD,
+    }

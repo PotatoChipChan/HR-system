@@ -43,7 +43,13 @@
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       {% set source_icon = {'Email':'📧','Portal':'🌐','Manual':'📝'} %}
       <span class="badge badge-gray" style="font-size:12px">{{ source_icon.get(app.source,'📋') }} {{ app.source }}</span>
-      <span class="badge {% if app.status=='Hired' %}badge-green{% elif app.status=='Rejected' %}badge-red{% elif app.status=='Interview' %}badge-blue{% elif app.status=='Offered' %}badge-blue{% elif app.status=='Shortlisted' %}badge-amber{% endif %}" style="font-size:13px;padding:5px 14px">{{ app.status }}</span>
+      <span class="badge {% if app.status=='Hired' %}badge-green{% elif app.status=='Rejected' %}badge-red{% elif app.status=='Offer Expired' %}badge-red{% elif app.status=='Interview' %}badge-blue{% elif app.status=='Offered' %}badge-blue{% elif app.status=='Shortlisted' %}badge-amber{% endif %}" style="font-size:13px;padding:5px 14px">{{ app.status }}</span>
+      {% if app.screening_status == 'Manual Review Required' %}
+      <span class="badge badge-amber" style="font-size:11px">Manual Review Required</span>
+      {% endif %}
+      {% if app.shortlist_override_by %}
+      <span class="badge badge-purple" style="font-size:11px">AI override applied</span>
+      {% endif %}
     </div>
   </div>
   <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:12px;font-size:13px;color:var(--text-secondary)">
@@ -53,7 +59,10 @@
     {% if app.applicant_address %}<span>📍 {{ app.applicant_address }}</span>{% endif %}
     <span>📅 Applied {{ app.applied_at[:10] }}</span>
     {% if app.ai_score is not none %}
-    <span>🤖 AI Score: <strong>{{ app.ai_score }}</strong></span>
+    <span>🤖 AI Score: <strong>{{ app.ai_score }}</strong>{% if app.scorer_version %} <span style="font-size:11px">(v{{ app.scorer_version }})</span>{% endif %}</span>
+    {% endif %}
+    {% if app.shortlist_override_reason %}
+    <span>🖊️ Override: {{ app.shortlist_override_reason }}</span>
     {% endif %}
   </div>
   {% if app.resume_path %}
@@ -77,14 +86,23 @@
   <div class="sec-title">Actions</div>
   <div class="btn-row" style="margin-bottom:0">
 
-    {% if app.status in ('New','Shortlisted','Interview') %}
+    {% if app.status in ('New','Shortlisted') and session['user_role'] in ('Admin','HR') %}
     <button class="btn btn-sm btn-primary" onclick="document.getElementById('schedule-form').style.display='block'">🗓️ Schedule Interview</button>
     {% endif %}
 
     {% if app.status == 'New' %}
-    <form method="POST" action="{{ url_for('recruitment.update_application_status', aid=app.application_id) }}" style="display:inline">
+    <form method="POST" action="{{ url_for('recruitment.update_application_status', aid=app.application_id) }}" style="display:inline-flex;gap:6px;align-items:center">
       <input type="hidden" name="status" value="Shortlisted">
+      <input class="form-input" name="override_reason" placeholder="Override reason (optional)" style="width:180px" maxlength="200">
       <button class="btn btn-sm btn-success" type="submit">⭐ Shortlist</button>
+    </form>
+    {% endif %}
+
+    {% if app.status == 'Shortlisted' %}
+    <form method="POST" action="{{ url_for('recruitment.update_application_status', aid=app.application_id) }}" style="display:inline-flex;gap:6px;align-items:center">
+      <input type="hidden" name="status" value="New">
+      <input class="form-input" name="override_reason" placeholder="Reverse reason (optional)" style="width:180px" maxlength="200">
+      <button class="btn btn-sm btn-outline-secondary" type="submit">↩️ Reverse Shortlist</button>
     </form>
     {% endif %}
 
@@ -95,16 +113,25 @@
     </form>
     {% endif %}
 
-    {% if contract %}
+    {% if not contract and not selection_approval and has_completed_scorecard and is_confirmable_candidate and session['user_role'] == 'HR Manager' %}
+    <form method="POST" action="{{ url_for('recruitment.confirm_candidate_selection', aid=app.application_id) }}" style="display:inline">
+      <button class="btn btn-sm btn-success" type="submit" onclick="return confirm('Confirm this candidate for selection? This enables contract preparation.')">✅ Confirm Selection</button>
+    </form>
+    {% endif %}
+    {% if app.posting_id and session['user_role'] == 'HR Manager' %}
+    <a href="{{ url_for('recruitment.view_posting', pid=app.posting_id) }}" class="btn btn-sm btn-outline-secondary">View Candidate Ranking</a>
+    {% endif %}
+
+    {% if contract and contract.status == 'Draft' %}
     <a href="{{ url_for('recruitment.contract', aid=app.application_id) }}" class="btn btn-sm btn-outline-secondary">📄 Edit Contract</a>
-    {% elif has_passed_interview %}
+    {% elif not contract and selection_approval %}
     <a href="{{ url_for('recruitment.contract', aid=app.application_id) }}" class="btn btn-sm btn-primary">📄 Create Contract & Send Offer</a>
     {% endif %}
 
   </div>
 
   {# ── Schedule Interview Form ── #}
-  {% if app.status in ('New','Shortlisted','Interview') %}
+  {% if app.status in ('New','Shortlisted') and session['user_role'] in ('Admin','HR') %}
   <form id="schedule-form" method="POST" action="{{ url_for('recruitment.schedule_interview', aid=app.application_id) }}" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
     <div class="form-row">
       <div class="form-group"><label class="form-label">Date *</label><input class="form-input" name="date" type="date" required></div>
@@ -112,22 +139,34 @@
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Duration (min)</label><input class="form-input" name="duration" type="number" value="60"></div>
-      <div class="form-group"><label class="form-label">Type</label>
-        <select class="form-input" name="type">
-          <option value="In-Person">In-Person</option>
-          <option value="Online">Online</option>
-          <option value="Phone">Phone</option>
+      <div class="form-group"><label class="form-label">Format *</label>
+        <select class="form-input" name="format" id="sch-format" required>
+          <option value="">Select format</option>
+          {% if branch_has_local_interviewers %}
+          <option value="Physical">Physical (posting branch venue)</option>
+          {% else %}
+          <option value="Physical" disabled title="This branch has no eligible local interviewers">Physical (posting branch venue)</option>
+          {% endif %}
+          <option value="Virtual">Virtual (meeting link)</option>
         </select>
+        {% if not branch_has_local_interviewers %}
+        <p class="hint" style="font-size:11px;color:var(--text-secondary);margin-top:4px">This branch has no eligible local interviewers. Schedule as Virtual instead.</p>
+        {% endif %}
       </div>
     </div>
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Venue</label><input class="form-input" name="location" placeholder="Room name"></div>
-      <div class="form-group"><label class="form-label">Video Link</label><input class="form-input" name="meeting_link" placeholder="https://"></div>
+    <div class="form-group" id="sch-link-group" style="display:none">
+      <label class="form-label">Meeting Link (Virtual) *</label>
+      <input class="form-input" name="meeting_link" placeholder="https://meet.example.com/...">
     </div>
+    <div class="form-group" id="sch-venue-group" style="display:none">
+      <label class="form-label">Venue (optional)</label>
+      <input class="form-input" name="venue" placeholder="e.g. Block A Meeting Room, Level 3">
+    </div>
+    <p class="hint" style="font-size:11px;color:var(--text-secondary);margin-top:4px">Physical interviews use the posting branch's address as the location and only interviewers from that branch. Virtual interviews use the company-wide roster; the manager who requested this position is listed first. You can optionally add a venue (e.g. Block A Meeting Room).</p>
     <div class="form-group"><label class="form-label">Interviewer(s)</label>
       <select class="form-input" name="interviewer_ids" multiple style="min-height:80px">
         {% for iv in eligible_interviewers %}
-        <option value="{{ iv.employee_id }}">{{ iv.full_name }} ({{ iv.role_name }})</option>
+        <option value="{{ iv.employee_id }}" data-branch="{{ iv.branch_id or '' }}">{{ iv.full_name }} ({{ iv.role_name }}){% if iv.is_requester %} (Requester){% endif %}</option>
         {% endfor %}
       </select>
     </div>
@@ -143,7 +182,7 @@
   <div class="sec-title">Interviews</div>
   {% if interviews %}
   <table class="tbl">
-    <thead><tr><th>Date</th><th>Interviewer</th><th>Type</th><th>Status</th><th>Result</th><th>Notes</th><th></th></tr></thead>
+    <thead><tr><th>Date</th><th>Interviewer</th><th>Type</th><th>Status</th><th>Legacy Outcome</th><th>Notes</th><th></th></tr></thead>
     <tbody>
       {% for iv in interviews %}
       <tr>
@@ -151,14 +190,13 @@
         <td>{{ iv.interviewer_names or '—' }}</td>
         <td>{{ iv.type }}</td>
         <td><span class="badge {% if iv.status=='Completed' %}badge-green{% elif iv.status=='Cancelled' %}badge-red{% else %}badge-blue{% endif %}">{{ iv.status }}</span></td>
-        <td>{% if iv.result %}<span class="badge {% if iv.result=='Pass' %}badge-green{% else %}badge-red{% endif %}">{{ iv.result }}</span>{% else %}—{% endif %}</td>
+        <td>{% if iv.result %}<span class="badge badge-gray">{{ iv.result }}</span>{% else %}—{% endif %}</td>
         <td>{{ iv.feedback or '—' }}</td>
         <td>
           <div style="display:flex;gap:4px;flex-wrap:wrap">
           {% if session['user_role'] in ('Admin','HR','HR Manager') and iv.status in ('Scheduled','Confirmed') and app.status not in ('Rejected','Hired') %}
-          <form method="POST" action="{{ url_for('recruitment.interview_result', iid=iv.interview_id) }}" style="display:flex;gap:4px">
-            <button class="btn btn-sm btn-success" name="result" value="Pass" onclick="return confirm('Mark as Pass? The candidate will advance to the offer stage.')">✅ Pass</button>
-            <button class="btn btn-sm btn-danger" name="result" value="Fail" onclick="return confirm('Mark as Fail? This will reject the candidate.')">❌ Fail</button>
+          <form method="POST" action="{{ url_for('recruitment.complete_interview', iid=iv.interview_id) }}" style="display:inline">
+            <button class="btn btn-sm btn-success" onclick="return confirm('Mark this interview as completed? You can then record its scorecard.')">Mark Completed</button>
           </form>
           <form method="POST" action="{{ url_for('recruitment.cancel_interview', iid=iv.interview_id) }}" style="display:inline">
             <button class="btn btn-sm btn-outline-secondary" onclick="return confirm('Cancel this interview?')">Cancel</button>
@@ -175,6 +213,44 @@
   {% endif %}
 </div>
 
+{# ── Interview Scorecard (fixed three criteria) ── #}
+<div class="card fade-in" style="margin-bottom:20px">
+  <div class="sec-title">Interview Scorecard</div>
+  <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">Fixed criteria, each rated 1–5 with an evidence note. Recorded by HR staff or Admin for completed interviews; the completed-scorecard totals determine candidate ranking.</p>
+  {% set completed = interviews | selectattr('status', 'equalto', 'Completed') | list %}
+  {% if completed %}
+    {% for iv in completed %}
+    <div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">🗓️ {{ iv.scheduled_at[:16] }} — {{ iv.interviewer_names or '—' }}</div>
+      {% if iv.scorecard %}
+      <table class="tbl" style="max-width:520px">
+        <tr><th>Criterion</th><th>Score</th><th>Evidence Note</th></tr>
+        <tr><td>Technical / role competence</td><td><strong>{{ iv.scorecard.technical }}</strong>/5</td><td style="font-size:13px">{{ iv.scorecard.note_technical }}</td></tr>
+        <tr><td>Communication &amp; collaboration</td><td><strong>{{ iv.scorecard.communication }}</strong>/5</td><td style="font-size:13px">{{ iv.scorecard.note_communication }}</td></tr>
+        <tr><td>Role fit &amp; professionalism</td><td><strong>{{ iv.scorecard.fit }}</strong>/5</td><td style="font-size:13px">{{ iv.scorecard.note_fit }}</td></tr>
+        <tr><td colspan="2"><strong>Total: {{ iv.scorecard.technical + iv.scorecard.communication + iv.scorecard.fit }}/15</strong></td><td></td></tr>
+      </table>
+      <p style="font-size:12px;color:var(--text-secondary);margin-top:8px">This scorecard is final — the first recorded decision cannot be updated.</p>
+      {% elif session.user_role in ('Admin','HR','HR Manager') %}
+      <form method="POST" action="{{ url_for('recruitment.interview_scorecard', iid=iv.interview_id) }}" style="margin-top:10px">
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Technical / role competence (1–5) *</label><input class="form-input" type="number" name="technical" min="1" max="5" required style="width:80px"></div>
+          <div class="form-group"><label class="form-label">Communication &amp; collaboration (1–5) *</label><input class="form-input" type="number" name="communication" min="1" max="5" required style="width:80px"></div>
+          <div class="form-group"><label class="form-label">Role fit &amp; professionalism (1–5) *</label><input class="form-input" type="number" name="fit" min="1" max="5" required style="width:80px"></div>
+        </div>
+        <div class="form-group"><label class="form-label">Technical evidence note *</label><textarea class="form-input" name="note_technical" rows="1" required></textarea></div>
+        <div class="form-group"><label class="form-label">Communication evidence note *</label><textarea class="form-input" name="note_communication" rows="1" required></textarea></div>
+        <div class="form-group"><label class="form-label">Role fit evidence note *</label><textarea class="form-input" name="note_fit" rows="1" required></textarea></div>
+        <button class="btn btn-sm btn-primary" type="submit">Record Scorecard</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% else %}
+  <div class="empty-state"><div class="icon">⭐</div><h3>No completed interviews</h3><p>Scorecards are recorded once an interview is marked Completed.</p></div>
+  {% endif %}
+</div>
+
 {# ── Contract / Offer Section ── #}
 <div class="card fade-in" style="margin-bottom:20px">
   <div class="sec-title">📄 Contract / Offer</div>
@@ -187,7 +263,7 @@
     <tr><th>Type</th><td>{{ contract.employment_type }}</td></tr>
     <tr><th>Work Hours</th><td>{{ contract.work_start_time }} – {{ contract.work_end_time }}</td></tr>
     <tr><th>Status</th><td>
-      <span class="badge {% if contract.status=='Accepted' %}badge-green{% elif contract.status=='Sent' %}badge-blue{% elif contract.status=='Signed' %}badge-purple{% elif contract.status=='Declined' %}badge-red{% else %}badge-amber{% endif %}">{{ contract.status }}</span>
+      <span class="badge {% if contract.status=='Accepted' %}badge-green{% elif contract.status=='Sent' %}badge-blue{% elif contract.status=='Signed' %}badge-purple{% elif contract.status=='Declined' %}badge-red{% elif contract.status=='Expired' %}badge-red{% else %}badge-amber{% endif %}">{{ contract.status }}</span>
     </td></tr>
     {% if contract.contract_doc_path %}
     <tr><th>Unsigned PDF</th><td><a href="{{ url_for('recruitment.download_contract', cid=contract.contract_id, aid=app.application_id) }}">Download</a></td></tr>
@@ -195,21 +271,57 @@
     {% if contract.signed_doc_path %}
     <tr><th>Signed PDF</th><td><a href="{{ url_for('recruitment.download_signed_contract', cid=contract.contract_id, aid=app.application_id) }}">Download Signed Contract</a></td></tr>
     {% endif %}
+    <tr><th>Offer Approval</th><td>
+      {% if not offer_approval %}<span class="badge badge-gray">Not requested</span>
+      {% elif offer_approval.status == 'Approved' %}<span class="badge badge-green">Approved</span>
+      {% elif offer_approval.status == 'Rejected' %}<span class="badge badge-red">Rejected{% if offer_approval.rejection_reason %} — {{ offer_approval.rejection_reason }}{% endif %}</span>
+      {% else %}<span class="badge badge-amber">Pending</span>{% endif %}
+    </td></tr>
+    {% if delivery_log %}
+    <tr><th>Email Delivery</th><td>
+      {% for d in delivery_log %}
+      <div style="font-size:12px"><span class="badge {% if d.status=='Sent' %}badge-green{% else %}badge-red{% endif %}" style="font-size:10px">{{ d.status }}</span> {{ d.recipient }} {% if d.last_error %}· {{ d.last_error }}{% endif %}</div>
+      {% endfor %}
+    </td></tr>
+    {% endif %}
   </table>
   {% if session['user_role'] in ('Admin','HR','HR Manager') %}
-  <div class="btn-row" style="margin-bottom:0">
+  <div class="btn-row" style="margin-bottom:0;flex-wrap:wrap">
     {% if contract.status == 'Draft' %}
-    <form method="POST" action="{{ url_for('recruitment.send_offer', aid=app.application_id) }}">
-      <button class="btn btn-sm btn-primary" type="submit">📧 Send Offer to Candidate</button>
-    </form>
+      {% if session['user_role'] == 'HR' %}
+      <form method="POST" action="{{ url_for('recruitment.request_offer_approval', cid=contract.contract_id) }}" style="display:inline">
+        <button class="btn btn-sm btn-outline-secondary" type="submit">🗳️ Request Offer Approval</button>
+      </form>
+      {% endif %}
+      {% if session['user_role'] in ('Admin','HR Manager') and offer_approval and offer_approval.status == 'Pending' %}
+      <form method="POST" action="{{ url_for('recruitment.approve_offer_approval', cid=contract.contract_id) }}" style="display:inline">
+        <button class="btn btn-sm btn-success" type="submit">✅ Approve Offer</button>
+      </form>
+      <form method="POST" action="{{ url_for('recruitment.reject_offer_approval', cid=contract.contract_id) }}" style="display:inline">
+        <input class="form-input" name="rejection_reason" placeholder="Reject reason *" style="width:150px" required>
+        <button class="btn btn-sm btn-outline-danger" type="submit">Reject</button>
+      </form>
+      {% endif %}
+      {% if session['user_role'] in ('Admin','HR Manager') %}
+      <form method="POST" action="{{ url_for('recruitment.send_offer', aid=app.application_id) }}" style="display:inline">
+        <button class="btn btn-sm btn-primary" type="submit">Send Offer to Candidate</button>
+      </form>
+      {% elif offer_approval and offer_approval.status == 'Approved' %}
+      <form method="POST" action="{{ url_for('recruitment.send_offer', aid=app.application_id) }}" style="display:inline">
+        <button class="btn btn-sm btn-primary" type="submit">📧 Send Offer to Candidate</button>
+      </form>
+      {% endif %}
     {% endif %}
     {% if contract.status == 'Sent' %}
+    <form method="POST" action="{{ url_for('recruitment.send_offer', aid=app.application_id) }}" style="display:inline">
+      <button class="btn btn-sm btn-outline-secondary" type="submit">📧 Resend Offer</button>
+    </form>
     <form method="POST" action="{{ url_for('recruitment.accept_offer_hr', aid=app.application_id) }}">
       <button class="btn btn-sm btn-success" type="submit">✅ Accept Offer (on behalf of candidate)</button>
     </form>
     {% endif %}
-    {% if contract.status in ('Signed', 'Accepted') %}
-    <a href="{{ url_for('recruitment.hire', aid=app.application_id) }}" class="btn btn-sm btn-primary">➕ Hire → Add Employee</a>
+    {% if contract.status in ('Signed', 'Accepted') and session.user_role in ('Admin','HR Manager') %}
+    <a href="{{ url_for('recruitment.hire', aid=app.application_id) }}" class="btn btn-sm btn-primary">➕ Confirm Hire → Add Employee</a>
     {% endif %}
   </div>
   {% endif %}
@@ -217,10 +329,58 @@
   <div class="empty-state">
     <div class="icon">📄</div>
     <h3>No contract yet</h3>
-    <p>Create a contract to send an offer to this candidate.</p>
+    {% if selection_approval %}
+    <p>Create a contract to prepare an offer for this approved candidate.</p>
     <a href="{{ url_for('recruitment.contract', aid=app.application_id) }}" class="btn btn-primary">📄 Create Contract</a>
+    {% elif has_completed_scorecard and is_confirmable_candidate and session['user_role'] == 'HR Manager' %}
+    <p>As HR Manager, you can confirm this top-scoring candidate directly, then prepare the contract draft.</p>
+    <form method="POST" action="{{ url_for('recruitment.confirm_candidate_selection', aid=app.application_id) }}" style="margin-top:12px">
+      <button class="btn btn-primary" type="submit" onclick="return confirm('Confirm this candidate for selection? This enables contract preparation.')">✅ Confirm Selection</button>
+    </form>
+    {% elif has_completed_scorecard and session['user_role'] == 'HR Manager' %}
+    <p>Only the top-scoring candidates within the posting's unfilled openings can be confirmed. Review the scorecard ranking before preparing a contract.</p>
+    <a href="{{ url_for('recruitment.view_posting', pid=app.posting_id) }}" class="btn">View Candidate Ranking</a>
+    {% else %}
+    <p>Complete scorecards, then have the HR Manager confirm the top-scoring candidates before creating an offer contract.</p>
+    {% endif %}
   </div>
   {% endif %}
 </div>
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  var dateInput = document.querySelector('#schedule-form input[name="date"]');
+  if (dateInput) {
+    dateInput.min = new Date().toISOString().slice(0, 10);
+  }
+  var fmtSel = document.getElementById('sch-format');
+  var linkGroup = document.getElementById('sch-link-group');
+  var venueGroup = document.getElementById('sch-venue-group');
+  var interviewerSel = fmtSel ? fmtSel.form.querySelector('select[name="interviewer_ids"]') : null;
+  var postingBranch = {{ posting_branch|tojson }};
+  if (!fmtSel) return;
+  function sync() {
+    if (linkGroup) {
+      linkGroup.style.display = fmtSel.value === 'Virtual' ? '' : 'none';
+      var linkInput = linkGroup.querySelector('input[name="meeting_link"]');
+      if (linkInput) linkInput.required = fmtSel.value === 'Virtual';
+    }
+    if (venueGroup) venueGroup.style.display = fmtSel.value === 'Physical' ? '' : 'none';
+    if (interviewerSel) {
+      for (var i = 0; i < interviewerSel.options.length; i++) {
+        var opt = interviewerSel.options[i];
+        var inBranch = opt.getAttribute('data-branch') === String(postingBranch || '');
+        var visible = fmtSel.value !== 'Physical' || inBranch;
+        opt.style.display = visible ? '' : 'none';
+        if (!visible && opt.selected) opt.selected = false;
+      }
+    }
+  }
+  fmtSel.addEventListener('change', sync);
+  sync();
+})();
+</script>
 {% endblock %}

@@ -8,6 +8,7 @@ numpy
 reportlab
 PyPDF2
 pdfplumber
+python-docx
 cryptography
 requests
 Flask-Mail

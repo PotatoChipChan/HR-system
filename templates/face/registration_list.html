@@ -11,6 +11,37 @@
     </div>
   </div>
 
+  <!-- FILTER ROW -->
+  <form method="GET" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+    <input type="text" name="q" class="form-input" placeholder="Search by name or email…"
+           value="{{ q }}" style="max-width:260px">
+    <select name="branch" class="form-input" style="width:auto" id="filter-branch">
+      <option value="">All Branches</option>
+      {% for b in branches %}
+      <option value="{{ b.branch_id }}" {{ 'selected' if selected_branch==b.branch_id }}>{{ b.name }}</option>
+      {% endfor %}
+    </select>
+    <select name="dept" class="form-input" style="width:auto" id="filter-dept">
+      <option value="">All Departments</option>
+      {% for d in departments %}
+      <option value="{{ d.department_id }}" data-branch-id="{{ d.branch_id }}"
+        {{ 'selected' if selected_dept==d.department_id }}>
+        {{ d.department_name }} ({{ d.branch_name }})
+      </option>
+      {% endfor %}
+    </select>
+    <select name="face_status" class="form-input" style="width:auto">
+      <option value="">All</option>
+      <option value="registered" {{ 'selected' if selected_face_status=='registered' }}>Registered</option>
+      <option value="not_registered" {{ 'selected' if selected_face_status=='not_registered' }}>Not Registered</option>
+    </select>
+    <button type="submit" class="btn btn-sm btn-primary">Filter</button>
+    {% if q or selected_branch is not none or selected_dept is not none or selected_face_status %}
+    <a href="{{ url_for('face.registration_list') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+    {% endif %}
+  </form>
+  <!-- /FILTER ROW -->
+
   {% if employees %}
   <table class="tbl">
     <thead>
@@ -75,4 +106,34 @@
   </div>
   {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    var branchSel = document.getElementById('filter-branch');
+    var deptSel   = document.getElementById('filter-dept');
+    if (!branchSel || !deptSel) return;
+
+    var allOptions = Array.from(deptSel.options);
+
+    function filterDepts(selectedBranch) {
+        deptSel.innerHTML = '';
+        allOptions.forEach(function(opt) {
+            if (opt.value === '' || selectedBranch === '' || opt.getAttribute('data-branch-id') === selectedBranch) {
+                deptSel.appendChild(opt.cloneNode(true));
+            }
+        });
+    }
+
+    if (branchSel.value) {
+        filterDepts(branchSel.value);
+    }
+
+    branchSel.addEventListener('change', function() {
+        filterDepts(branchSel.value);
+        deptSel.value = '';
+    });
+})();
+</script>
 {% endblock %}

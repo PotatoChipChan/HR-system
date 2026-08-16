@@ -6,7 +6,12 @@
   <tr><td style="padding:4px 8px;font-weight:600">Time:</td><td>{{ interview_time }}</td></tr>
   <tr><td style="padding:4px 8px;font-weight:600">Venue:</td><td>{{ location }}</td></tr>
   <tr><td style="padding:4px 8px;font-weight:600">Type:</td><td>{{ interview_type }}</td></tr>
+  {% if interview_ref %}<tr><td style="padding:4px 8px;font-weight:600">Interview Ref:</td><td>{{ interview_ref }}</td></tr>{% endif %}
 </table>
-<p style="margin:0 0 16px;font-size:14px;color:#555;line-height:1.6">Please confirm your attendance by replying to this email. If you have any questions, feel free to contact us.</p>
+<p style="margin:0 0 16px;font-size:14px;color:#555;line-height:1.6">Please confirm your attendance by replying to this email.{% if interview_ref %} Keep the <strong>{{ interview_ref }}</strong> reference in your reply so we can match it to your interview.{% endif %} If you have any questions, feel free to contact us.</p>
 <p style="margin:0;font-size:13px;color:#888">We look forward to meeting you!</p>
+{% endblock %}
+
+{% block email_footer %}
+<p style="margin:0;font-size:11px;color:#8a9a8a">This is an automated message from <strong>SmartHR</strong>. Replies to this message are monitored for interview confirmations.</p>
 {% endblock %}

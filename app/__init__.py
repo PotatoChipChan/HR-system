@@ -12,6 +12,10 @@ def create_app():
     app = Flask(__name__, instance_relative_config=True,
                 template_folder='../templates',
                 static_folder='../static')
+    # Cloudflare Quick Tunnels may forward a blueprint root URL without its
+    # final slash. Accept both forms so Flask does not issue a canonical-slash
+    # redirect that a proxy can loop back to the same request.
+    app.url_map.strict_slashes = False
 
     # ── Secret key ────────────────────────────────────────────────────────
     # Production startup fails hard when SECRET_KEY is missing or still the
@@ -121,6 +125,10 @@ def create_app():
     from app.payroll.autogen import start_payroll_scheduler
     start_payroll_scheduler(app)
 
+    # ── Offer Expiry Scheduler (server-side, dev/test-fast interval) ───────
+    from app.recruitment.offer_expiry import start_offer_expiry_scheduler
+    start_offer_expiry_scheduler(app)
+
     # ── Rate Limiting ───────────────────────────────────────────────────────
     # Applied globally via before_request. Earlier this list mistakenly
     # SKIPPED auth.login / auth.forgot_password / auth.reset_password, leaving
@@ -178,6 +186,7 @@ def create_app():
     def inject_notifications():
         from app.database import query
         from flask import session
+        from app.recruitment.scoping import count_visible_new_applications
         if 'user_id' in session and 'company_id' in session:
             co = session['company_id']
             user_id = session['user_id']
@@ -186,7 +195,7 @@ def create_app():
                 pending_notifs = []
                 user_role = session.get('user_role')
                 branch_id = session.get('branch_id')
-                if user_role in ['Admin','HR','HR Manager','HR Director','Manager']:
+                if user_role in ['Admin','HR','HR Manager','Manager']:
                     leave_where = "la.status='Pending' AND e.company_id=?"
                     leave_params = [co]
                     invoice_where = "i.status='Pending' AND e.company_id=?"
@@ -225,10 +234,10 @@ def create_app():
                 """, (user_id,))
                 unread_system_notifs = [dict(r) for r in unread_notif_rows]
                 
-                # Pending approval notifications for Admin/HR/HR Manager/HR Director
+                # Pending approval notifications for Admin/HR/HR Manager
                 approval_notifs = []
                 user_role = session.get('user_role')
-                if user_role in ('Admin', 'HR', 'HR Manager', 'HR Director'):
+                if user_role in ('Admin', 'HR', 'HR Manager'):
                     approval_rows = query("""
                         SELECT 'Increment' as type, COUNT(*) as cnt,
                                MIN(COALESCE(si.reviewed_at, si.proposed_at)) as dt
@@ -249,16 +258,11 @@ def create_app():
                         for row in approval_rows if row['cnt'] > 0
                     ][:3]
                     # Add pending applications
-                    apps_row = query("""
-                        SELECT COUNT(*) as cnt FROM Job_Application ja
-                        LEFT JOIN Job_Posting jp ON ja.posting_id=jp.posting_id
-                        LEFT JOIN Branch b ON jp.branch_id=b.branch_id
-                        WHERE ja.status='New' AND (b.company_id=? OR ja.posting_id IS NULL)
-                    """, (co,), one=True)
-                    if apps_row and apps_row['cnt'] > 0:
+                    visible_new_apps = count_visible_new_applications(session)
+                    if visible_new_apps > 0:
                         approval_notifs.append({
                             'type': 'Approval', 'ref': 'Application', 'dt': '',
-                            'message': f"{apps_row['cnt']} pending application{'s' if apps_row['cnt'] != 1 else ''} awaiting review"
+                            'message': f"{visible_new_apps} pending application{'s' if visible_new_apps != 1 else ''} awaiting review"
                         })
                     # Add pending offers (sent contracts not yet accepted)
                     offers_row = query("""
@@ -273,12 +277,23 @@ def create_app():
                             'type': 'Approval', 'ref': 'Offer', 'dt': '',
                             'message': f"{offers_row['cnt']} pending offer{'s' if offers_row['cnt'] != 1 else ''} awaiting response"
                         })
+                    # Add pending job posting requests
+                    vac_row = query("""
+                        SELECT COUNT(*) as cnt FROM Vacancy_Request vr
+                        JOIN Employee e ON vr.requested_by=e.employee_id
+                        WHERE vr.status='Pending' AND e.company_id=?
+                    """, (co,), one=True)
+                    if vac_row and vac_row['cnt'] > 0:
+                        approval_notifs.append({
+                            'type': 'Approval', 'ref': 'Job Posting Request', 'dt': '',
+                            'message': f"{vac_row['cnt']} pending job posting request{'s' if vac_row['cnt'] != 1 else ''} awaiting review"
+                        })
                 
                 # Combine them: approval/pending items first (pinned), then system notifications
                 header_notifs = list(approval_notifs) + list(pending_notifs) + list(unread_system_notifs)
                 header_notifs = header_notifs[:8]
                 
-                # Count pending items for Admin/HR/HR Manager/HR Director
+                # Count pending items for Admin/HR/HR Manager
                 pending_inc = 0
                 pending_bonus = 0
                 pending_applications = 0
@@ -293,7 +308,7 @@ def create_app():
                 if is_dept_mgr and managed_dept_id:
                     vac_row = query("SELECT COUNT(*) as c FROM Vacancy_Request WHERE status='Pending' AND department_id=?", (managed_dept_id,), one=True)
                     pending_vacancy = vac_row['c'] if vac_row else 0
-                if user_role in ('Admin', 'HR', 'HR Manager', 'HR Director'):
+                if user_role in ('Admin', 'HR', 'HR Manager'):
                     inc_row = query("""
                         SELECT COUNT(*) as c FROM Salary_Increment si
                         JOIN Employee e ON si.employee_id=e.employee_id
@@ -312,13 +327,7 @@ def create_app():
                         WHERE bp.status='Pending' AND e.company_id=?
                     """, (co,), one=True)
                     pending_bonus = bonus_row['c'] if bonus_row else 0
-                    apps_row = query("""
-                        SELECT COUNT(*) as c FROM Job_Application ja
-                        LEFT JOIN Job_Posting jp ON ja.posting_id=jp.posting_id
-                        LEFT JOIN Branch b ON jp.branch_id=b.branch_id
-                        WHERE ja.status='New' AND (b.company_id=? OR ja.posting_id IS NULL)
-                    """, (co,), one=True)
-                    pending_applications = apps_row['c'] if apps_row else 0
+                    pending_applications = count_visible_new_applications(session)
                     leave_row = query("""
                         SELECT COUNT(*) as c FROM Leave_Application la
                         JOIN Employee e ON la.employee_id=e.employee_id
@@ -350,12 +359,7 @@ def create_app():
                         WHERE i.status='Pending' AND e.company_id=? AND e.branch_id=?
                     """, (co, branch_id), one=True)
                     pending_invoice = invoice_row['c'] if invoice_row else 0
-                    apps_row = query("""
-                        SELECT COUNT(*) as c FROM Job_Application ja
-                        JOIN Job_Posting jp ON ja.posting_id=jp.posting_id
-                        WHERE ja.status='New' AND jp.branch_id=?
-                    """, (branch_id,), one=True)
-                    pending_applications = apps_row['c'] if apps_row else 0
+                    pending_applications = count_visible_new_applications(session)
                     
                 return dict(
                     header_notifications=header_notifs,

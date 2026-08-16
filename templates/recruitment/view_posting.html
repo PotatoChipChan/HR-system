@@ -9,34 +9,44 @@
   <div style="display:flex;justify-content:space-between;align-items:start">
     <div>
       <p><strong>Department:</strong> {{ posting.department_name }} &middot; <strong>Branch:</strong> {{ posting.branch_name }}</p>
-      <p><strong>Type:</strong> {{ posting.employment_type }} &middot; <strong>Status:</strong> {{ posting.status }} &middot; <strong>Posted by:</strong> {{ posting.posted_by_name }}</p>
+      <p><strong>Type:</strong> {{ posting.employment_type }} &middot; <strong>Status:</strong> {% if posting.status=='Open' %}<span class="badge badge-green">Open</span>{% elif posting.status=='Partially Filled' %}<span class="badge badge-amber">Partially Filled</span>{% elif posting.status=='Filled' %}<span class="badge badge-blue">Filled</span>{% elif posting.status=='Archived' %}<span class="badge badge-gray">Archived</span>{% else %}<span class="badge">Closed</span>{% endif %} &middot; <strong>Posted by:</strong> {{ posting.posted_by_name }}</p>
+      <p><strong>Openings:</strong> {{ posting.filled_openings or 0 }} filled / {{ posting.reserved_openings or 0 }} reserved / {{ posting.approved_openings or 1 }} approved</p>
       {% if posting.min_salary %}<p><strong>Salary:</strong> RM{{ posting.min_salary }}{% if posting.max_salary %} – RM{{ posting.max_salary }}{% endif %}</p>{% endif %}
     </div>
-    <div>
+    <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+      {% if posting.status in ('Open','Partially Filled') %}
       <a href="{{ url_for('recruitment.public_apply', pid=posting.posting_id) }}" class="btn btn-primary">Apply Now</a>
+      {% endif %}
+      {% if session['user_role'] in ('Admin','HR Manager') and posting.status != 'Archived' %}
+      <form method="POST" action="{{ url_for('recruitment.delete_posting', pid=posting.posting_id) }}" onsubmit="return confirm('Delete this job posting? This is only allowed when no interviews have been scheduled for it.')">
+        <button class="btn btn-sm btn-outline-danger" type="submit">🗑️ Delete Posting</button>
+      </form>
+      {% endif %}
     </div>
   </div>
    <h4>Description</h4><p>{{ posting.description or 'No description.' }}</p>
    <h4>Requirements</h4><p>{{ posting.requirements or 'No requirements specified.' }}</p>
 </div>
 
-{% if session['user_role'] in ('Admin','HR','HR Manager','HR Director') %}
+{% if session['user_role'] in ('Admin','HR','HR Manager') %}
 <div class="card fade-in" style="margin-bottom:20px;border-left:4px solid #1a6b3a">
   <div class="sec-title">External Application Instructions</div>
   <p style="color:var(--text-secondary);font-size:14px;margin-bottom:12px">Copy the format below to JobStreet, LinkedIn, or other external platforms. Candidates can also apply via the <a href="{{ url_for('recruitment.careers') }}" target="_blank">Careers Page ↗</a>.</p>
-  <div style="background:#f5f5f5;border:1px solid #e0e0e0;border-radius:8px;padding:16px;font-family:monospace;font-size:13px;white-space:pre-wrap;margin-bottom:12px">To apply, send your application to <strong>careers@smarthr.my</strong> with this format:
-
-Name: [Your full name]
+  <p style="font-size:14px;margin-bottom:4px">To apply, send your application to <strong>chanhanyue-wp22@student.tarc.edu.my</strong> with this format:</p>
+  <p style="font-size:14px;margin-bottom:12px;color:var(--text-secondary)">Subject: <strong>Application for {{ posting.title }}</strong></p>
+  <textarea readonly rows="14" class="form-input" id="ext-app-format" style="font-family:monospace;font-size:13px;resize:vertical;white-space:pre-wrap;min-height:200px" onclick="this.select()">Name: [Your full name]
 Position: {{ posting.title }}
 Email: [Your email address]
 IC: [Your IC number]
 Phone: [Your contact number]
 Address: [Your address]
+Emergency Contact Name: [Next of kin name]
+Emergency Contact No: [Next of kin contact number]
 
 [Attach your CV and write your cover letter below]
 ---
-[Ref: POST-{{ posting.posting_id }}]</div>
-  <button class="btn btn-sm" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy to Clipboard',2000)">Copy to Clipboard</button>
+[Ref: POST-{{ posting.posting_id }}]</textarea>
+  <button class="btn btn-sm" style="margin-top:8px" onclick="var t=document.getElementById('ext-app-format');t.select();navigator.clipboard.writeText(t.value);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy to Clipboard',2000)">Copy to Clipboard</button>
 </div>
 {% endif %}
 
@@ -101,6 +111,56 @@ Address: [Your address]
     <div><label class="label" style="font-size:12px">Cover Letter</label><textarea class="form-input" name="cover_letter" rows="1" style="width:250px"></textarea></div>
     <button class="btn btn-sm btn-primary" type="submit">Add Application</button>
   </form>
+  {% endif %}
+</div>
+
+{# ── Scorecard ranking ── #}
+<div class="card fade-in" style="margin-top:20px">
+  <div class="sec-title">Candidate Ranking</div>
+  <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">Ranking is calculated from completed interview scorecards (Technical + Communication + Fit, each 1–5). The HR Manager confirms the highest-scoring candidate; this never hires or sends an offer automatically.</p>
+  {% if ranking %}
+  <table class="tbl">
+    <thead><tr><th>Rank</th><th>Candidate</th><th>Status</th><th>Scorecards</th><th>Score Total</th></tr></thead>
+    <tbody>
+      {% for r in ranking %}
+      <tr>
+        <td style="font-weight:600">{{ loop.index }}</td>
+        <td><a href="{{ url_for('recruitment.view_application', aid=r.application_id) }}" style="font-weight:600;text-decoration:none;color:var(--text-primary)">{{ r.applicant_name }}</a></td>
+        <td><span class="badge badge-gray">{{ r.status }}</span></td>
+        <td>{{ r.scorecard_count }}</td>
+        <td><strong>{{ r.total }}</strong></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><div class="icon">⭐</div><h3>No scorecards yet</h3><p>Record scorecards on completed interviews to build the ranking.</p></div>
+  {% endif %}
+</div>
+
+{# ── Recorded Selection Decisions ── #}
+<div class="card fade-in" style="margin-top:20px">
+  <div class="sec-title">Recorded Selection Decisions</div>
+  {% if recommendations %}
+  <table class="tbl">
+    <thead><tr><th>Candidate</th><th>Recommended By</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for rec in recommendations %}
+      <tr>
+        <td><strong>{{ rec.applicant_name }}</strong></td>
+        <td>{{ rec.recommended_by or '—' }}</td>
+        <td>
+          <span class="badge {% if rec.status=='Approved' %}badge-green{% elif rec.status=='Rejected' %}badge-red{% else %}badge-amber{% endif %}">{{ rec.status }}</span>
+          {% if rec.rejection_reason %}<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">{{ rec.rejection_reason }}</div>{% endif %}
+        </td>
+        <td></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% if not recommendations %}
+  <p style="font-size:12px;color:var(--text-secondary);margin:0">No candidate has been confirmed yet. HR completes scorecards; the HR Manager confirms the top-scoring candidates from the ranking (up to the posting's unfilled openings).</p>
   {% endif %}
 </div>
 {% endblock %}

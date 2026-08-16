@@ -1,7 +1,10 @@
 """app/main/routes.py – Dashboard"""
+import datetime
 from flask import Blueprint, render_template, session, jsonify
 from app.database import query, as_dict, is_leave_eligible
 from app.auth.routes import login_required
+from app.recruitment.scoping import (application_visibility_scope,
+                                     count_visible_new_applications)
 
 main_bp = Blueprint('main', __name__)
 
@@ -88,6 +91,18 @@ def dashboard():
             )
             ORDER BY created_at DESC
         """, (uid, uid))
+
+        # Dept managers can also submit job posting requests
+        my_vacancy_requests = []
+        if session.get('is_dept_manager'):
+            my_vacancy_requests = query("""
+                SELECT vr.request_id, vr.position_title, vr.status, vr.created_at,
+                       d.department_name
+                FROM Vacancy_Request vr
+                JOIN Department d ON vr.department_id=d.department_id
+                WHERE vr.requested_by=?
+                ORDER BY vr.created_at DESC LIMIT 5
+            """, (uid,))
         
         return render_template('dashboard.html',
                                emp=emp,
@@ -96,7 +111,8 @@ def dashboard():
                                leave_balances=leave_balances,
                                recent_payslips=recent_payslips,
                                recent_attendance=recent_attendance,
-                               own_pending=own_pending)
+                               own_pending=own_pending,
+                               my_vacancy_requests=my_vacancy_requests)
 
     elif role == 'Manager':
         # ── Metrics for Manager's Branch ──
@@ -104,9 +120,13 @@ def dashboard():
             "SELECT COUNT(*) as c FROM Employee WHERE company_id=? AND branch_id=? AND employment_status='Active'",
             (co, bid), one=True)['c']
 
-        on_leave = query(
-            "SELECT COUNT(*) as c FROM Employee WHERE company_id=? AND branch_id=? AND employment_status='On Leave'",
-            (co, bid), one=True)['c']
+        on_leave = query("""
+            SELECT COUNT(DISTINCT la.employee_id) AS c
+            FROM Leave_Application la
+            JOIN Employee e ON e.employee_id=la.employee_id
+            WHERE e.company_id=? AND e.branch_id=? AND la.status='Approved'
+              AND ? BETWEEN la.start_date AND la.end_date
+        """, (co, bid, datetime.date.today().isoformat()), one=True)['c']
 
         pending_leaves = query(
             "SELECT COUNT(*) as c FROM Leave_Application la "
@@ -150,15 +170,29 @@ def dashboard():
             GROUP BY d.department_name
         """, (co, bid))
 
+        # ── My job posting requests (own submissions) ──
+        my_vacancy_requests = query("""
+            SELECT vr.request_id, vr.position_title, vr.status, vr.created_at,
+                   d.department_name
+            FROM Vacancy_Request vr
+            JOIN Department d ON vr.department_id=d.department_id
+            WHERE vr.requested_by=?
+            ORDER BY vr.created_at DESC LIMIT 5
+        """, (uid,))
+
     else:
         # ── Metrics for Admin/HR ──
         total_emp = query(
             "SELECT COUNT(*) as c FROM Employee WHERE company_id=? AND employment_status='Active'",
             (co,), one=True)['c']
 
-        on_leave = query(
-            "SELECT COUNT(*) as c FROM Employee WHERE company_id=? AND employment_status='On Leave'",
-            (co,), one=True)['c']
+        on_leave = query("""
+            SELECT COUNT(DISTINCT la.employee_id) AS c
+            FROM Leave_Application la
+            JOIN Employee e ON e.employee_id=la.employee_id
+            WHERE e.company_id=? AND la.status='Approved'
+              AND ? BETWEEN la.start_date AND la.end_date
+        """, (co, datetime.date.today().isoformat()), one=True)['c']
 
         pending_leaves = query(
             "SELECT COUNT(*) as c FROM Leave_Application la "
@@ -210,7 +244,8 @@ def dashboard():
         """)
         union_params.append(co)
 
-        # Job Applications (all admin roles)
+        # Job Applications (only applications visible to this user)
+        application_scope, application_scope_params = application_visibility_scope(session)
         union_parts.append("""
             SELECT * FROM (
                 SELECT 'Application' as type, 'A-'||ja.application_id as ref,
@@ -218,14 +253,14 @@ def dashboard():
                 FROM Job_Application ja
                 LEFT JOIN Job_Posting jp ON ja.posting_id=jp.posting_id
                 LEFT JOIN Branch b ON jp.branch_id=b.branch_id
-                WHERE ja.status='New' AND (b.company_id=? OR ja.posting_id IS NULL)
+                WHERE ja.status='New' AND (""" + application_scope + """)
                 LIMIT 5
             )
         """)
-        union_params.append(co)
+        union_params.extend(application_scope_params)
 
         # Bonus + Increment (Admin/HR Manager only)
-        if role in ('Admin', 'HR Manager', 'HR Director'):
+        if role in ('Admin', 'HR Manager'):
             union_parts.append("""
                 SELECT * FROM (
                     SELECT 'Bonus' as type, 'BP-'||bp.proposal_id as ref,
@@ -262,20 +297,10 @@ def dashboard():
         """, (co,))
 
     # Per-type pending counts for toast notifications (direct COUNT queries)
-    if role == 'Manager':
-        pending_applications_count = query("""
-            SELECT COUNT(*) as c FROM Job_Application ja
-            JOIN Job_Posting jp ON ja.posting_id=jp.posting_id
-            WHERE ja.status='New' AND jp.branch_id=?
-        """, (bid,), one=True)['c']
-    else:
-        pending_applications_count = query("""
-            SELECT COUNT(*) as c FROM Job_Application ja
-            LEFT JOIN Job_Posting jp ON ja.posting_id=jp.posting_id
-            LEFT JOIN Branch b ON jp.branch_id=b.branch_id
-            WHERE ja.status='New' AND (b.company_id=? OR ja.posting_id IS NULL)
-        """, (co,), one=True)['c']
-    if role in ('Admin', 'HR Manager', 'HR Director'):
+    pending_applications_count = count_visible_new_applications(session)
+    if not session.get('is_dept_manager') and role not in ('Employee', 'Manager'):
+        my_vacancy_requests = []
+    if role in ('Admin', 'HR Manager'):
         pending_increment_count = query("""
             SELECT COUNT(*) as c FROM Salary_Increment si
             JOIN Employee e ON si.employee_id=e.employee_id
@@ -302,27 +327,22 @@ def dashboard():
                            pending_applications_count=pending_applications_count,
                             activity=activity,
                             pending_q=pending_q,
-                            dept_dist=dept_dist)
+                            dept_dist=dept_dist,
+                            my_vacancy_requests=my_vacancy_requests)
 
 
 @main_bp.route('/api/check-email')
 @login_required
 def check_email():
     role = session.get('user_role')
-    if role not in ('Admin', 'HR', 'HR Manager', 'HR Director'):
+    if role not in ('Admin', 'HR', 'HR Manager'):
         return jsonify({'ok': False, 'error': 'Unauthorized'}), 403
 
     try:
         from app.notifications.email_monitor import poll_inbox
         new_apps, new_accepts, new_declines = poll_inbox()
 
-        co = session['company_id']
-        total_apps = query(
-            "SELECT COUNT(*) as c FROM Job_Application ja "
-            "LEFT JOIN Job_Posting jp ON ja.posting_id=jp.posting_id "
-            "LEFT JOIN Branch b ON jp.branch_id=b.branch_id "
-            "WHERE ja.status='New' AND (b.company_id=? OR ja.posting_id IS NULL)",
-            (co,), one=True)['c']
+        total_apps = count_visible_new_applications(session)
 
         return jsonify({
             'ok': True,

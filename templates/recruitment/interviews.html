@@ -26,8 +26,9 @@
     </form>
   </div>
   {% if interviews %}
-  <table class="tbl">
-    <thead><tr><th>Date</th><th>Applicant</th><th>Position</th><th>Interviewer</th><th>Type</th><th>Status</th><th></th></tr></thead>
+  <div class="table-scroll" tabindex="0" aria-label="Interviews table. Scroll horizontally to see all columns.">
+  <table class="tbl interviews-table">
+    <thead><tr><th>Date</th><th>Applicant</th><th>Position</th><th>Interviewer</th><th>Format</th><th>Status</th><th></th></tr></thead>
     <tbody>
       {% for iv in interviews %}
       <tr>
@@ -35,11 +36,29 @@
         <td><a href="{{ url_for('recruitment.view_application', aid=iv.application_id) }}" style="font-weight:600;text-decoration:none;color:var(--text-primary)">{{ iv.applicant_name }}</a></td>
         <td>{{ iv.job_title }}</td>
         <td>{{ iv.interviewer_name or '—' }}</td>
-        <td>{{ iv.type }}</td>
+        <td>
+          {% if iv.format %}
+          <span class="badge {% if iv.format=='Physical' %}badge-blue{% else %}badge-purple{% endif %}">{{ iv.format }}</span>
+          {% else %}{{ iv.type }}{% endif %}
+          {% if iv.format == 'Physical' %}
+            {% set iv_loc = iv.location or iv.venue %}
+            {% if iv_loc %}<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">{{ iv_loc[:60] }}{% if iv.venue and iv.venue != iv_loc %} — {{ iv.venue[:60] }}{% endif %}</div>{% endif %}
+          {% endif %}
+          {% if iv.format == 'Virtual' and iv.meeting_link %}<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">{{ iv.meeting_link[:60] }}</div>{% endif %}
+        </td>
         <td><span class="badge {% if iv.status=='Completed' %}badge-green{% elif iv.status=='Cancelled' %}badge-red{% else %}badge-blue{% endif %}">{{ iv.status }}</span></td>
         <td>
           <a href="{{ url_for('recruitment.view_application', aid=iv.application_id) }}" class="btn btn-sm btn-outline-secondary">View</a>
           {% if session['user_role'] in ('Admin','HR','HR Manager') and iv.status in ('Scheduled','Confirmed') %}
+          <button class="btn btn-sm btn-outline-secondary" onclick="var f=document.getElementById('resched-{{ iv.interview_id }}');f.style.display=f.style.display==='none'?'':'none'">Reschedule</button>
+          <form id="resched-{{ iv.interview_id }}" method="POST" action="{{ url_for('recruitment.reschedule_interview', iid=iv.interview_id) }}" style="display:none;margin-top:6px;padding:8px;background:var(--bg-secondary);border-radius:8px">
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">New Date *</label><input class="form-input" name="date" type="date" required></div>
+              <div class="form-group"><label class="form-label">New Time *</label><input class="form-input" name="time" type="time" required></div>
+            </div>
+            <div class="form-group"><label class="form-label">Reason *</label><input class="form-input" name="reason" required placeholder="e.g. interviewer unavailable"></div>
+            <button class="btn btn-sm btn-primary" type="submit">Confirm Reschedule</button>
+          </form>
           <form method="POST" action="{{ url_for('recruitment.cancel_interview', iid=iv.interview_id) }}" style="display:inline">
             <button class="btn btn-sm btn-outline-secondary" onclick="return confirm('Cancel this interview?')">Cancel</button>
           </form>
@@ -49,8 +68,23 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
   <div class="empty-state"><div class="icon">🗓️</div><h3>No interviews found</h3></div>
   {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  // Mirrors the server-side future-slot rule and prevents an accidental
+  // past-date choice before submission. The server remains authoritative for
+  // same-day times and crafted requests.
+  var today = new Date().toISOString().slice(0, 10);
+  document.querySelectorAll('form[id^="resched-"] input[name="date"]').forEach(function(input) {
+    input.min = today;
+  });
+})();
+</script>
 {% endblock %}

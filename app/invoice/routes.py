@@ -1662,7 +1662,9 @@ def claims_management():
     if role == 'Manager':
         stats_sql += " AND e.branch_id=?"
         stats_args.append(session['branch_id'])
-    stats = query(stats_sql, stats_args, one=True)
+    stats = as_dict(query(stats_sql, stats_args, one=True)) or {}
+    for key in ('pending', 'approved', 'rejected', 'total_approved'):
+        stats[key] = stats.get(key) or 0
 
     return render_template('invoice/claims.html',
                            invoices=invoices, stats=stats, status_f=status_f)
@@ -1672,6 +1674,18 @@ def claims_management():
 @login_required
 def upload():
     uid = session['user_id']
+    f = request.form
+    try:
+        subtotal = _round_money(f.get('subtotal', 0))
+        tax_amount = _round_money(f.get('tax_amount', 0))
+        total_amount = _round_money(f.get('total_amount', 0))
+    except (TypeError, ValueError):
+        flash('Enter valid invoice amounts.', 'danger')
+        return redirect(url_for('invoice.list_invoices'))
+    if subtotal < 0 or tax_amount < 0 or total_amount <= 0:
+        flash('Invoice amounts cannot be negative and the total must be greater than zero.', 'danger')
+        return redirect(url_for('invoice.list_invoices'))
+
     file = request.files.get('invoice_file')
     if not file or file.filename == '':
         flash('No file selected.', 'danger')
@@ -1686,9 +1700,7 @@ def upload():
     save_path = os.path.join(current_app.config['UPLOAD_FOLDER'], saved_fn)
     file.save(save_path)
 
-    f = request.form
     currency = f.get('currency') or 'MYR'
-    total_amount = _round_money(f.get('total_amount', 0))
     exchange_rate = None
     total_amount_myr = total_amount
     
@@ -1714,8 +1726,7 @@ def upload():
           f.get('vendor_name', ''), f.get('invoice_number', ''),
           f.get('invoice_date', ''), f.get('due_date', ''),
           currency, exchange_rate,
-          _round_money(f.get('subtotal', 0)),
-          _round_money(f.get('tax_amount', 0)),
+          subtotal, tax_amount,
           total_amount, total_amount_myr,
           f.get('category', ''), f.get('description', ''), 'Pending'))
 
@@ -1749,7 +1760,9 @@ def upload():
 @role_required('Admin', 'HR', 'HR Manager', 'Manager')
 def approve(iid):
     uid = session['user_id']
-    inv = query("""SELECT i.employee_id, i.invoice_number, i.total_amount, e.branch_id
+    inv = query("""SELECT i.employee_id, i.invoice_number,
+                          COALESCE(i.total_amount_myr, i.total_amount) AS claim_amount,
+                          e.branch_id
                     FROM Invoice i
                     JOIN Employee e ON i.employee_id=e.employee_id
                     WHERE i.invoice_id=?""", (iid,), one=True)
@@ -1760,10 +1773,10 @@ def approve(iid):
                WHERE invoice_id=?""", (uid, iid))
 
     # Apply claim to the next available Draft payroll immediately
-    if inv and inv['total_amount']:
+    if inv and inv['claim_amount']:
         try:
             from app.payroll.helpers import apply_claim_to_payroll
-            apply_claim_to_payroll(inv['employee_id'], inv['total_amount'], iid,
+            apply_claim_to_payroll(inv['employee_id'], inv['claim_amount'], iid,
                                    user_id=uid)
         except Exception as e:
             print(f"Failed to apply claim to payroll: {e}")
@@ -1785,9 +1798,9 @@ def approve(iid):
 def reject(iid):
     uid    = session['user_id']
     reason = request.form.get('reason', '')
-    inv = query("""SELECT employee_id, invoice_number, e.branch_id
-                   FROM Invoice i JOIN Employee e ON i.employee_id=e.employee_id
-                   WHERE i.invoice_id=?""", (iid,), one=True)
+    inv = query("""SELECT i.employee_id, i.invoice_number, e.branch_id
+                    FROM Invoice i JOIN Employee e ON i.employee_id=e.employee_id
+                    WHERE i.invoice_id=?""", (iid,), one=True)
     if session.get('user_role') == 'Manager' and inv and inv['branch_id'] != session.get('branch_id'):
         flash('Access denied: this claim belongs to another branch.', 'danger')
         return redirect(url_for('invoice.claims_management'))
@@ -1812,7 +1825,7 @@ def view_document(iid):
     co = session['company_id']
     role = session['user_role']
     uid = session['user_id']
-    if role in ('Admin', 'HR', 'HR Manager', 'HR Director'):
+    if role in ('Admin', 'HR', 'HR Manager'):
         inv = query("""SELECT i.filename
                        FROM Invoice i
                        JOIN Employee e ON i.employee_id=e.employee_id

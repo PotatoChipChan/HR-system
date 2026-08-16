@@ -10,7 +10,7 @@
       <select class="form-input" name="posting_id" id="posting_select" required>
         <option value="">Select a posting with shortlisted candidates</option>
         {% for p in postings %}
-        <option value="{{ p.posting_id }}" {{ 'selected' if request.args.get('pid')==p.posting_id|string }}>{{ p.title }} ({{ p.candidate_count }} shortlisted)</option>
+        <option value="{{ p.posting_id }}" data-branch="{{ p.branch_name }}" data-has-local="{{ '1' if p.local_interviewers else '0' }}" data-requester="{{ p.requester_id or '' }}" {{ 'selected' if request.args.get('pid')==p.posting_id|string }}>{{ p.title }} ({{ p.candidate_count }} shortlisted, {{ p.branch_name }})</option>
         {% endfor %}
       </select>
     </div>
@@ -24,23 +24,22 @@
       <div class="form-group mb-0"><label class="label">Duration per Slot (min)</label><input class="form-input" name="duration" type="number" value="30" min="15" step="5"></div>
     </div>
     <div class="form-row">
-      <div class="form-group mb-0"><label class="label">Interview Type</label>
-        <select class="form-input" name="type">
-          <option value="In-Person">In-Person</option>
-          <option value="Online">Online</option>
-          <option value="Phone">Phone</option>
+      <div class="form-group mb-0"><label class="label">Format *</label>
+        <select class="form-input" name="format" id="bk-format" required>
+          <option value="">Select format</option>
+          <option value="Physical" id="bk-physical-opt">Physical (posting branch venue)</option>
+          <option value="Virtual">Virtual (meeting link)</option>
         </select>
       </div>
-      <div class="form-group mb-0"><label class="label">Venue</label><input class="form-input" name="location" placeholder="Room name or address"></div>
+      <div class="form-group mb-0" id="bk-link-group" style="display:none"><label class="label">Meeting Link (Virtual) *</label><input class="form-input" name="meeting_link" placeholder="https://"></div>
+      <div class="form-group mb-0" id="bk-venue-group" style="display:none"><label class="label">Venue (optional)</label><input class="form-input" name="venue" placeholder="e.g. Block A Meeting Room, Level 3"></div>
     </div>
-    <div class="form-group">
-      <label class="label">Meeting Link</label><input class="form-input" name="meeting_link" placeholder="https://">
-    </div>
+    <p class="hint" style="font-size:11px;color:var(--text-secondary);margin:-4px 0 12px">Physical interviews use the posting branch's address as the location and only interviewers from that branch. Virtual interviews use the company-wide roster; the manager who requested the position is listed first. You can optionally add a venue (e.g. Block A Meeting Room).</p>
     <div class="form-group">
       <label class="label">Interviewer(s)</label>
       <select class="form-input" name="interviewer_ids" multiple style="min-height:80px">
         {% for iv in interviewers %}
-        <option value="{{ iv.employee_id }}">{{ iv.full_name }} ({{ iv.role_name }})</option>
+        <option value="{{ iv.employee_id }}" data-branch="{{ iv.branch_name or '' }}">{{ iv.full_name }} ({{ iv.role_name }})</option>
         {% endfor %}
       </select>
     </div>
@@ -53,6 +52,50 @@
 {% endblock %}
 {% block scripts %}
 <script>
+(function() {
+  var fmtSel = document.getElementById('bk-format');
+  var linkGroup = document.getElementById('bk-link-group');
+  var venueGroup = document.getElementById('bk-venue-group');
+  var postingSel = document.getElementById('posting_select');
+  var physicalOpt = document.getElementById('bk-physical-opt');
+  var interviewerSel = document.querySelector('select[name="interviewer_ids"]');
+  var requesterId = null;
+  function sync() {
+    if (linkGroup) {
+      linkGroup.style.display = fmtSel.value === 'Virtual' ? '' : 'none';
+      var linkInput = linkGroup.querySelector('input[name="meeting_link"]');
+      if (linkInput) linkInput.required = fmtSel.value === 'Virtual';
+    }
+    if (venueGroup) venueGroup.style.display = fmtSel.value === 'Physical' ? '' : 'none';
+    if (interviewerSel && postingSel) {
+      var postingOpt = postingSel.options[postingSel.selectedIndex];
+      var postingBranch = postingOpt && postingOpt.value ? postingOpt.getAttribute('data-branch') : null;
+      var physicalDisabled = !postingOpt || !postingOpt.value || postingOpt.getAttribute('data-has-local') !== '1';
+      if (physicalOpt) physicalOpt.disabled = physicalDisabled;
+      if (physicalDisabled && fmtSel.value === 'Physical') fmtSel.value = '';
+      for (var i = 0; i < interviewerSel.options.length; i++) {
+        var opt = interviewerSel.options[i];
+        var visible = fmtSel.value !== 'Physical' || (postingBranch && opt.getAttribute('data-branch') === postingBranch);
+        opt.style.display = visible ? '' : 'none';
+        if (!visible && opt.selected) opt.selected = false;
+        var label = opt.getAttribute('data-base-label') || opt.textContent;
+        opt.setAttribute('data-base-label', label);
+        var isReq = requesterId && String(opt.value) === String(requesterId);
+        opt.textContent = (isReq && visible) ? label + ' (Requester)' : label;
+      }
+    }
+  }
+  function onPostingChange() {
+    var postingOpt = postingSel.options[postingSel.selectedIndex];
+    requesterId = postingOpt && postingOpt.value ? (postingOpt.getAttribute('data-requester') || null) : null;
+    sync();
+  }
+  if (fmtSel) {
+    fmtSel.addEventListener('change', sync);
+    if (postingSel) postingSel.addEventListener('change', onPostingChange);
+    sync();
+  }
+})();
 document.getElementById('posting_select').addEventListener('change', function() {
   var pid = this.value;
   var container = document.getElementById('candidate-list');
@@ -74,6 +117,7 @@ document.getElementById('posting_select').addEventListener('change', function() 
       container.style.display = 'block';
     });
 });
+document.querySelector('input[name="date"]').min = new Date().toISOString().slice(0, 10);
 {% if request.args.get('pid') %}
 document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('posting_select').dispatchEvent(new Event('change'));

@@ -5,38 +5,67 @@
 {% block content %}
 <div class="two-col">
   <div class="card fade-in">
-    <div class="sec-title">Manual {% if is_checked_in %}Check-Out{% else %}Check-In{% endif %}</div>
+    <div class="sec-title">Manual Attendance</div>
     <div class="ai-panel" style="margin-bottom:20px">
       <div class="ai-tag">⏳ Pending Approval</div>
-      <p style="font-size:12px;margin-top:4px">Submit a manual attendance request. Another Admin/HR must approve it before it takes effect.</p>
+      <p style="font-size:12px;margin-top:4px">Record or correct attendance for an employee. Another Admin/HR must approve it before it takes effect.</p>
     </div>
     <form method="POST" action="{{ url_for('attendance.manual') }}">
       <div class="form-row">
         <div class="form-group">
+          <label class="form-label">Branch</label>
+          <select class="form-input" id="emp_filter_branch">
+            <option value="">All Branches</option>
+            {% for b in branches %}
+            <option value="{{ b.branch_id }}">{{ b.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Department</label>
+          <select class="form-input" id="emp_filter_dept">
+            <option value="">All Departments</option>
+            {% for d in departments %}
+            <option value="{{ d.department_id }}" data-branch-id="{{ d.branch_id }}">{{ d.department_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Employee *</label>
+        <select class="form-input" name="employee_id" id="target_employee" required>
+          <option value="">Select employee</option>
+          {% for e in employees %}
+          <option value="{{ e.employee_id }}" data-branch-id="{{ e.branch_id }}" data-dept-id="{{ e.department_id }}">{{ e.full_name }} ({{ e.branch_name }}{% if e.department_name %} · {{ e.department_name }}{% endif %})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
           <label class="form-label">Date *</label>
-          <input class="form-input" type="date" name="att_date" required
-                 value="{{ now().strftime('%Y-%m-%d') if now else '' }}">
+          <input class="form-input" type="date" name="att_date" required value="{{ today }}">
         </div>
         <div class="form-group">
           <label class="form-label">Time *</label>
           <input class="form-input" type="time" name="att_time" required value="09:00">
         </div>
       </div>
-      {% set default_type = 'Check Out' if is_checked_in else 'Check In' %}
       <div class="form-group">
         <label class="form-label">Entry Type *</label>
         <select class="form-input" name="att_type" required>
-          <option value="Check In" {% if default_type=='Check In' %}selected{% endif %}>Check In</option>
-          <option value="Check Out" {% if default_type=='Check Out' %}selected{% endif %}>Check Out</option>
+          <option value="Check In">Check In</option>
+          <option value="Check Out">Check Out</option>
         </select>
       </div>
       <div class="form-group">
         <label class="form-label">Branch</label>
-        <select class="form-input" name="branch_id">
+        <select class="form-input" name="branch_id" id="target_branch">
+          <option value="">Employee's branch</option>
           {% for b in branches %}
-          <option value="{{ b.branch_id }}" {% if b.branch_id==session.branch_id %}selected{% endif %}>{{ b.name }}</option>
+          <option value="{{ b.branch_id }}">{{ b.name }}</option>
           {% endfor %}
         </select>
+        <p class="hint" style="font-size:11px;color:var(--text-secondary);margin-top:4px">Must match the selected employee's branch.</p>
       </div>
       <div class="form-group">
         <label class="form-label">Override Reason *</label>
@@ -48,7 +77,7 @@
           <option value="HR correction">HR correction</option>
         </select>
       </div>
-      <button class="btn btn-primary" type="submit" style="width:100%">Submit Manual {% if is_checked_in %}Check-Out{% else %}Check-In{% endif %}</button>
+      <button class="btn btn-primary" type="submit" style="width:100%">Submit Manual Entry</button>
     </form>
   </div>
 
@@ -74,4 +103,59 @@
     {% endif %}
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  var empSel = document.getElementById('target_employee');
+  var branchSel = document.getElementById('target_branch');
+  var filterBranch = document.getElementById('emp_filter_branch');
+  var filterDept = document.getElementById('emp_filter_dept');
+  if (!empSel) return;
+
+  function filterEmployees() {
+    var branchId = filterBranch ? filterBranch.value : '';
+    var deptId = filterDept ? filterDept.value : '';
+    var visible = 0;
+    empSel.querySelectorAll('option[data-branch-id]').forEach(function(opt) {
+      var show = (!branchId || opt.getAttribute('data-branch-id') === branchId)
+              && (!deptId || opt.getAttribute('data-dept-id') === deptId);
+      opt.style.display = show ? '' : 'none';
+      opt.disabled = !show;
+      if (show) visible += 1;
+    });
+    if (empSel.value && empSel.selectedOptions[0] && empSel.selectedOptions[0].style.display === 'none') {
+      empSel.value = '';
+    }
+  }
+
+  if (filterBranch && filterDept) {
+    function filterDeptOptions() {
+      var branchId = filterBranch.value;
+      filterDept.querySelectorAll('option[data-branch-id]').forEach(function(opt) {
+        var show = !branchId || opt.getAttribute('data-branch-id') === branchId;
+        opt.style.display = show ? '' : 'none';
+        opt.disabled = !show;
+      });
+      if (filterDept.value && filterDept.selectedOptions[0] && filterDept.selectedOptions[0].style.display === 'none') {
+        filterDept.value = '';
+      }
+      filterEmployees();
+    }
+    filterBranch.addEventListener('change', filterDeptOptions);
+    filterDept.addEventListener('change', filterEmployees);
+    filterDeptOptions();
+  }
+
+  if (empSel && branchSel) {
+    empSel.addEventListener('change', function() {
+      var opt = empSel.selectedOptions[0];
+      if (opt && opt.getAttribute('data-branch-id')) {
+        branchSel.value = opt.getAttribute('data-branch-id');
+      }
+    });
+  }
+})();
+</script>
 {% endblock %}

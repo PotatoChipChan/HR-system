@@ -1554,7 +1554,7 @@ def get_notifications():
     
     # Get dynamic pending items (approvals + pending leaves/invoices) for relevant to approve)
     dynamic_notifs = []
-    if user_role in ('Admin', 'HR', 'HR Manager', 'HR Director'):
+    if user_role in ('Admin', 'HR', 'HR Manager'):
         # Pending increments
         inc_rows = query("""
             SELECT si.increment_id, si.employee_id, si.increment_pct, si.proposed_at,
@@ -1812,7 +1812,9 @@ def list_employees():
     role  = session['user_role']
     bid   = session.get('branch_id')
     search = request.args.get('q', '')
+    branch_f = request.args.get('branch', '')
     dept   = request.args.get('dept', '')
+    position_id = request.args.get('position_id', '')
     etype  = request.args.get('type', '')
     status = request.args.get('status', '')
 
@@ -1832,9 +1834,20 @@ def list_employees():
     if search:
         sql += " AND (e.full_name LIKE ? OR e.email LIKE ? OR CAST(e.employee_id AS TEXT) LIKE ?)"
         args += [f'%{search}%', f'%{search}%', f'%{search}%']
+    if branch_f:
+        sql += " AND e.branch_id = ?"
+        args.append(branch_f)
     if dept:
         sql += " AND e.department_id = ?"
         args.append(dept)
+    if position_id:
+        try:
+            position_id = int(position_id)
+        except (TypeError, ValueError):
+            position_id = ''
+        else:
+            sql += " AND e.position_id = ?"
+            args.append(position_id)
     if etype:
         sql += " AND e.employment_type = ?"
         args.append(etype)
@@ -1846,11 +1859,23 @@ def list_employees():
     employees = query(sql, args)
     if role == 'Manager':
         departments = query("SELECT d.* FROM Department d JOIN Branch b ON d.branch_id=b.branch_id WHERE b.company_id=? AND d.branch_id=? ORDER BY department_name", (co, bid))
+        branches = query("SELECT * FROM Branch WHERE company_id=? AND branch_id=? ORDER BY name", (co, bid))
     else:
-        departments = query("SELECT * FROM Department d JOIN Branch b ON d.branch_id=b.branch_id WHERE b.company_id=? ORDER BY department_name", (co,))
+        departments = query("SELECT d.*, b.name as branch_name FROM Department d JOIN Branch b ON d.branch_id=b.branch_id WHERE b.company_id=? ORDER BY department_name", (co,))
+        branches = query("SELECT * FROM Branch WHERE company_id=? ORDER BY name", (co,))
+    positions = query("""
+        SELECT p.position_id, p.position_name, p.department_id
+        FROM Position p
+        JOIN Department d ON p.department_id=d.department_id
+        JOIN Branch b ON d.branch_id=b.branch_id
+        WHERE p.is_active=1 AND b.company_id=?
+        ORDER BY LOWER(p.position_name)
+    """, (co,))
     return render_template('employees/list.html',
                            employees=employees, departments=departments,
-                           search=search, dept=dept, etype=etype, status=status)
+                           branches=branches, positions=positions,
+                           search=search, branch_f=branch_f, dept=dept, position_id=position_id,
+                           etype=etype, status=status)
 
 
 @emp_bp.route('/upload-ic')
@@ -1879,6 +1904,14 @@ def add_employee():
         prefill_data = json.loads(prefill)
         form_data = prefill_data
         contract_id_from_hire = prefill_data.get('contract_id')
+    elif request.method == 'GET' and request.args.get('setup_branch_manager'):
+        form_data = {
+            key: request.args.get(key, '')
+            for key in ('branch_id', 'department_id', 'position_id')
+        }
+        manager_role = next((role for role in roles if role['role_name'] == 'Manager'), None)
+        if manager_role:
+            form_data['role_id'] = str(manager_role['role_id'])
 
     error_fields = []
     if request.method == 'POST':
@@ -1904,6 +1937,7 @@ def add_employee():
 
             # IC Number — Malaysian format
             ic = f.get('ic_number', '').strip()
+            passport_number = f.get('passport_number', '').strip() or None
             if ic:
                 ic_clean = ic.replace('-', '')
                 ic_valid = (re.match(r'^\d{12}$', ic_clean) or re.match(r'^\d{6}-\d{2}-\d{4}$', ic))
@@ -1941,6 +1975,7 @@ def add_employee():
             # ── Position: catalog entry OR free-text custom (no auto-create) ──
             position_id = f.get('position_id') or ''
             position_text = f.get('position', '').strip()
+            gender = f.get('gender') or None
             if position_id and position_id != '__custom__':
                 pos = query("SELECT * FROM Position WHERE position_id=? AND is_active=1",
                             (int(position_id),), one=True)
@@ -1962,9 +1997,9 @@ def add_employee():
                  work_start_time, work_end_time)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (co, f['branch_id'], f['department_id'], f['full_name'],
-                  f.get('ic_number',''), f.get('passport_number',''), f.get('contact_no',''),
+                  ic or None, passport_number, f.get('contact_no',''),
                   f.get('address',''), f.get('date_of_birth',''),
-                  f.get('gender',''), f.get('emergency_contact_name',''),
+                  gender, f.get('emergency_contact_name',''),
                   f.get('emergency_contact_no',''), position_text, position_id,
                   f['employment_type'], f.get('employment_status','Active'),
                   f['hire_date'], float(f.get('base_salary', 0)),
@@ -2038,6 +2073,11 @@ def add_employee():
             session.pop('hire_prefill', None)
 
             flash(f'Employee "{f["full_name"]}" added successfully with {role_name} permissions!', 'success')
+            if f.get('continue_setup') == 'posting':
+                return redirect(url_for('recruitment.add_posting',
+                                        branch_id=f.get('branch_id', ''),
+                                        department_id=f.get('department_id', ''),
+                                        position_id=position_id or ''))
             return redirect(url_for('employees.list_employees'))
         except Exception as e:
             error_fields = []
@@ -2064,13 +2104,15 @@ def add_employee():
                            departments=departments, branches=branches, roles=roles,
                            positions=positions,
                            form_data=form_data,
+                           setup_branch_manager=request.args.get('setup_branch_manager') == '1'
+                                                or form_data.get('setup_branch_manager') == '1',
                            error_fields=error_fields if error_fields else [])
 
 
 @emp_bp.route('/<int:emp_id>')
 @login_required
 def view_employee(emp_id):
-    from datetime import datetime
+    from datetime import datetime, date
 
     current_user_id = session['user_id']
     # Employees can only view themselves unless HR/Admin/Manager
@@ -2121,6 +2163,13 @@ def view_employee(emp_id):
         ORDER BY check_in DESC LIMIT 10
     """, (emp_id,))
 
+    is_on_leave_today = query("""
+        SELECT 1 FROM Leave_Application
+        WHERE employee_id=? AND status='Approved'
+          AND ? BETWEEN start_date AND end_date
+        LIMIT 1
+    """, (emp_id, date.today().isoformat()), one=True) is not None
+
     # Check current user's access status for this employee's IC
     has_access = False
     pending_request = None
@@ -2164,27 +2213,55 @@ def view_employee(emp_id):
                            has_ic_access=has_access, pending_ic_request=pending_request,
                            pending_requests_for_me=pending_requests_for_me,
                            employee_contract=employee_contract,
-                           has_face_registered=has_face_registered)
+                           has_face_registered=has_face_registered,
+                           is_on_leave_today=is_on_leave_today)
 
 
 @emp_bp.route('/<int:emp_id>/edit', methods=['POST'])
 @role_required('Admin', 'HR', 'Manager')
 def edit_employee(emp_id):
     from app.database import assign_role_permissions
-    
-    # Manager branch check
+    f = request.form
+    target_emp = query("""SELECT employee_id, company_id, branch_id, department_id, role_id
+                          FROM Employee WHERE employee_id=?""", (emp_id,), one=True)
+    if not target_emp:
+        flash('Employee not found.', 'danger')
+        return redirect(url_for('employees.list_employees'))
+
+    try:
+        branch_id = int(f.get('branch_id', ''))
+        department_id = int(f.get('department_id', ''))
+        new_role_id = int(f.get('role_id', ''))
+        base_salary = float(f.get('base_salary', 0))
+    except (TypeError, ValueError):
+        flash('Enter valid employee assignment and salary values.', 'danger')
+        return redirect(url_for('employees.view_employee', emp_id=emp_id))
+
+    # Managers may edit staff records in their branch, but hidden form inputs
+    # must not let a crafted request move staff or alter their role.
     if session['user_role'] == 'Manager':
-        target_emp = query("SELECT branch_id FROM Employee WHERE employee_id = ?", (emp_id,), one=True)
-        if not target_emp or target_emp['branch_id'] != session['branch_id']:
+        if target_emp['branch_id'] != session['branch_id']:
             flash('Access denied. You can only edit staff from your own branch.', 'danger')
             return redirect(url_for('main.dashboard'))
+        if (branch_id != target_emp['branch_id'] or
+                department_id != target_emp['department_id'] or
+                new_role_id != target_emp['role_id']):
+            flash('Managers cannot change an employee\'s branch, department, or role.', 'danger')
+            return redirect(url_for('employees.view_employee', emp_id=emp_id))
 
-    f = request.form
+    branch = query("SELECT company_id FROM Branch WHERE branch_id=?", (branch_id,), one=True)
+    department = query("SELECT branch_id FROM Department WHERE department_id=?", (department_id,), one=True)
+    role = query("SELECT role_id FROM Role WHERE role_id=?", (new_role_id,), one=True)
+    if (not branch or branch['company_id'] != target_emp['company_id'] or
+            not department or department['branch_id'] != branch_id or not role):
+        flash('Select a valid branch, department, and role for this employee.', 'danger')
+        return redirect(url_for('employees.view_employee', emp_id=emp_id))
+    if base_salary < 0:
+        flash('Base salary cannot be negative.', 'danger')
+        return redirect(url_for('employees.view_employee', emp_id=emp_id))
     
     # Get the old role_id before updating
-    old_emp = query("SELECT role_id FROM Employee WHERE employee_id=?", (emp_id,), one=True)
-    old_role_id = old_emp['role_id'] if old_emp else None
-    new_role_id = int(f['role_id'])
+    old_role_id = target_emp['role_id']
     
     execute("""
         UPDATE Employee SET
@@ -2199,7 +2276,7 @@ def edit_employee(emp_id):
           f.get('date_of_birth',''), f.get('gender',''),
           f.get('emergency_contact_name',''), f.get('emergency_contact_no',''),
           f.get('position',''), f['employment_type'], f.get('employment_status','Active'),
-          float(f.get('base_salary', 0)), f['branch_id'], f['department_id'], new_role_id,
+          base_salary, branch_id, department_id, new_role_id,
           f.get('work_start_time','09:00'), f.get('work_end_time','18:00'),
           emp_id))
     

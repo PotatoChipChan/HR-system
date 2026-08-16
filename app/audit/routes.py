@@ -15,9 +15,11 @@ def index():
     date_from = request.args.get('from', '')
     date_to   = request.args.get('to', '')
     search    = request.args.get('q', '')
-    page      = int(request.args.get('page', 1))
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+    except (TypeError, ValueError):
+        page = 1
     per_page  = 20
-    offset    = (page - 1) * per_page
 
     sql  = """SELECT al.*, e.full_name FROM AuditLog al
               LEFT JOIN Employee e ON al.employee_id=e.employee_id WHERE 1=1"""
@@ -38,6 +40,10 @@ def index():
         args += [f'%{search}%', f'%{search}%', f'%{search}%']
 
     total = query(f"SELECT COUNT(*) as c FROM ({sql})", args, one=True)['c']
+    total_pages = (total + per_page - 1) // per_page
+    if total_pages:
+        page = min(page, total_pages)
+    offset = (page - 1) * per_page
     sql  += " ORDER BY al.created_at DESC LIMIT ? OFFSET ?"
     args += [per_page, offset]
     logs  = query(sql, args)
@@ -52,11 +58,24 @@ def index():
 
     modules = query("SELECT DISTINCT module_name FROM AuditLog ORDER BY module_name")
     actions = query("SELECT DISTINCT action FROM AuditLog ORDER BY action")
-    total_pages = (total + per_page - 1) // per_page
+    page_numbers = []
+    if total_pages:
+        start = max(1, page - 2)
+        end = min(total_pages, page + 2)
+        if start > 1:
+            page_numbers.append(1)
+            if start > 2:
+                page_numbers.append(None)
+        page_numbers.extend(range(start, end + 1))
+        if end < total_pages:
+            if end < total_pages - 1:
+                page_numbers.append(None)
+            page_numbers.append(total_pages)
 
     return render_template('audit_log.html',
                            logs=logs, today_stats=today_stats,
                            modules=modules, actions=actions,
                            module=module, action=action, status=status,
                            date_from=date_from, date_to=date_to, search=search,
-                           page=page, total_pages=total_pages, total=total)
+                           page=page, total_pages=total_pages, total=total,
+                           page_numbers=page_numbers)

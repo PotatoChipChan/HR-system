@@ -178,6 +178,67 @@
     }
     .job-card .btn-apply:hover { background: var(--primary-dark); }
 
+    /* ── Email Client Chooser ── */
+    .mail-chooser[hidden] { display: none; }
+    .mail-chooser {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(15, 23, 42, 0.52);
+    }
+    .mail-chooser-card {
+      width: min(100%, 440px);
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      box-shadow: 0 18px 48px rgba(0,0,0,0.24);
+      padding: 24px;
+    }
+    .mail-chooser-heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+    .mail-chooser h2 { font-size: 20px; line-height: 1.3; }
+    .mail-chooser p { color: var(--text-secondary); font-size: 14px; margin-bottom: 18px; }
+    .mail-close {
+      border: 0;
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 24px;
+      line-height: 1;
+      padding: 0 2px;
+    }
+    .mail-options { display: grid; gap: 10px; }
+    .mail-option {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 13px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+      font-weight: 600;
+      text-align: left;
+    }
+    .mail-option:hover, .mail-option:focus-visible {
+      border-color: var(--primary);
+      background: var(--primary-light);
+      outline: none;
+    }
+    .mail-option span { color: var(--text-secondary); font-size: 13px; font-weight: 400; }
+
     /* ── Empty State ── */
     .empty-state {
       text-align: center;
@@ -244,7 +305,7 @@
 <div class="main-content">
   <h2 class="section-title">{{ "Open Positions" if postings else "No Open Positions" }}</h2>
   {% if postings %}
-  <p class="section-subtitle">Click <strong>Apply Now</strong> on any position — your email client will open with a pre-filled application template. Fill in your details and attach your CV.</p>
+  <p class="section-subtitle">Click <strong>Apply Now</strong> on any position, choose your preferred email service, then fill in your details and attach your CV.</p>
 
   <div class="job-grid">
     {% for p in postings %}
@@ -263,10 +324,14 @@
           <p class="job-desc">{{ p.description[:200] if p.description else '' }}{% if p.description and p.description|length > 200 %}...{% endif %}</p>
         </div>
       </div>
-      <a class="btn-apply" href="mailto:{{ apply_email }}?subject=Application for {{ p.title|urlencode }}&body=Name:%0D%0APosition: {{ p.title|urlencode }}%0D%0AEmail:%0D%0AIC:%0D%0APhone:%0D%0AAddress:%0D%0A%0D%0A[Attach your CV and write your cover letter below]%0D%0A%0D%0A---%0D%0A[Ref: POST-{{ p.posting_id }}]">
+      <button class="btn-apply js-apply" type="button"
+              data-apply-email="{{ apply_email }}"
+              data-job-title="{{ p.title }}"
+              data-posting-id="{{ p.posting_id }}"
+              aria-haspopup="dialog">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l6 5 6-5M3 3h10a1 1 0 011 1v8a1 1 0 01-1 1H3a1 1 0 01-1-1V4a1 1 0 011-1z"/></svg>
         Apply Now
-      </a>
+      </button>
     </article>
     {% endfor %}
   </div>
@@ -278,12 +343,96 @@
   {% endif %}
 </div>
 
+<div class="mail-chooser" id="mail-chooser" hidden aria-hidden="true">
+  <div class="mail-chooser-card" role="dialog" aria-modal="true" aria-labelledby="mail-chooser-title">
+    <div class="mail-chooser-heading">
+      <h2 id="mail-chooser-title">Choose how to apply</h2>
+      <button class="mail-close" id="mail-chooser-close" type="button" aria-label="Close email client chooser">&times;</button>
+    </div>
+    <p>Your application email will be pre-filled. Attach your CV before sending.</p>
+    <div class="mail-options">
+      <button class="mail-option" type="button" data-mail-client="default">Default email app <span>Outlook desktop, Apple Mail, etc.</span></button>
+      <button class="mail-option" type="button" data-mail-client="gmail">Gmail <span>Open in browser</span></button>
+      <button class="mail-option" type="button" data-mail-client="outlook">Outlook <span>Open in browser</span></button>
+      <button class="mail-option" type="button" data-mail-client="yahoo">Yahoo Mail <span>Open in browser</span></button>
+    </div>
+  </div>
+</div>
+
 <!-- Footer -->
 <footer class="site-footer">
   <div class="company-name">{{ company.name if company else 'SmartHR' }}</div>
   {% if company %}<div>{{ company.address or '' }}</div>{% endif %}
   <div style="margin-top:4px">&copy; {{ current_year }} {{ company.name if company else 'SmartHR' }}. All rights reserved.</div>
 </footer>
+
+<script>
+(function () {
+  var chooser = document.getElementById('mail-chooser');
+  var closeButton = document.getElementById('mail-chooser-close');
+  var activeButton = null;
+  var application = null;
+
+  function closeChooser() {
+    chooser.hidden = true;
+    chooser.setAttribute('aria-hidden', 'true');
+    if (activeButton) activeButton.focus();
+  }
+
+  function openChooser(button) {
+    activeButton = button;
+    application = {
+      email: button.dataset.applyEmail,
+      subject: 'Application for ' + button.dataset.jobTitle,
+      body: 'Name:\r\nPosition: ' + button.dataset.jobTitle + '\r\nEmail:\r\nIC:\r\nPhone:\r\nAddress:\r\n\r\n[Attach your CV and write your cover letter below]\r\n\r\n---\r\n[Ref: POST-' + button.dataset.postingId + ']'
+    };
+    chooser.hidden = false;
+    chooser.setAttribute('aria-hidden', 'false');
+    closeButton.focus();
+  }
+
+  function openMailClient(client) {
+    var params = new URLSearchParams({
+      to: application.email,
+      subject: application.subject,
+      body: application.body
+    });
+    var url;
+
+    if (client === 'default') {
+      window.location.href = 'mailto:' + encodeURIComponent(application.email) +
+        '?subject=' + encodeURIComponent(application.subject) +
+        '&body=' + encodeURIComponent(application.body);
+      closeChooser();
+      return;
+    }
+    if (client === 'gmail') {
+      url = 'https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(application.email) +
+        '&su=' + encodeURIComponent(application.subject) + '&body=' + encodeURIComponent(application.body);
+    } else if (client === 'outlook') {
+      url = 'https://outlook.office.com/mail/deeplink/compose?' + params.toString();
+    } else {
+      url = 'https://compose.mail.yahoo.com/?' + params.toString();
+    }
+    window.open(url, '_blank', 'noopener');
+    closeChooser();
+  }
+
+  document.querySelectorAll('.js-apply').forEach(function (button) {
+    button.addEventListener('click', function () { openChooser(button); });
+  });
+  document.querySelectorAll('[data-mail-client]').forEach(function (button) {
+    button.addEventListener('click', function () { openMailClient(button.dataset.mailClient); });
+  });
+  closeButton.addEventListener('click', closeChooser);
+  chooser.addEventListener('click', function (event) {
+    if (event.target === chooser) closeChooser();
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && !chooser.hidden) closeChooser();
+  });
+}());
+</script>
 
 </body>
 </html>

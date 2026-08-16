@@ -34,33 +34,29 @@
       <input type="date" name="to" class="form-input" value="{{ date_to }}">
       <select name="method" class="form-input">
         <option value="">All Methods</option>
-        <option value="biometric" {% if method=='biometric' %}selected{% endif %}>Biometric</option>
-        <option value="manual" {% if method=='manual' %}selected{% endif %}>Manual</option>
+        <option value="biometric" {% if selected_method=='biometric' %}selected{% endif %}>Biometric</option>
+        <option value="manual" {% if selected_method=='manual' %}selected{% endif %}>Manual</option>
       </select>
-      {% if session.user_role in ['Admin','HR Director','HR Manager','HR','Manager'] %}
-      <select name="employee" class="form-input">
-        <option value="">All Employees</option>
-        {% for e in employees %}
-        <option value="{{ e.employee_id }}" {% if emp_filter==e.employee_id|string %}selected{% endif %}>{{ e.full_name }}</option>
-        {% endfor %}
-      </select>
+      {% if session.user_role in ['Admin','HR Manager','HR','Manager'] %}
+      <input type="text" name="q" class="form-input" placeholder="Search employee name…" value="{{ search_q }}" style="min-width:200px">
       <select name="branch" class="form-input">
         <option value="">All Branches</option>
         {% for b in branches %}
-        <option value="{{ b.branch_id }}" {% if branch==b.branch_id|string %}selected{% endif %}>{{ b.name }}</option>
+        <option value="{{ b.branch_id }}" {% if selected_branch==b.branch_id|string %}selected{% endif %}>{{ b.name }}</option>
         {% endfor %}
       </select>
       {% endif %}
       <button class="btn btn-primary" type="submit">Apply</button>
-      <a href="{{ url_for('attendance.attendance_logs', from=date_from, to=date_to, method=method, employee=emp_filter, branch=branch, export='csv') }}" class="btn btn-sm">📄 Export CSV</a>
+      <a href="{{ url_for('attendance.attendance_logs', from=date_from, to=date_to, method=selected_method, q=search_q, branch=selected_branch, export=1) }}" class="btn btn-sm">📄 Export CSV</a>
     </div>
   </form>
 </div>
 
 <div class="card fade-in">
   <div class="sec-title">Attendance Records</div>
-  {% if logs %}
-  <table class="tbl">
+  {% if records %}
+  <div class="table-scroll" tabindex="0" aria-label="Attendance records table. Scroll horizontally to see all columns.">
+  <table class="tbl attendance-table">
     <thead>
       <tr>
         <th>Employee</th>
@@ -76,7 +72,7 @@
       </tr>
     </thead>
     <tbody>
-      {% for a in logs %}
+      {% for a in records %}
       <tr>
         <td>{{ a.full_name }}</td>
         <td>{{ a.department_name }}</td>
@@ -108,7 +104,8 @@
       {% endfor %}
     </tbody>
   </table>
-  <div class="text-muted" style="margin-top:12px">{{ logs|length }} record(s) shown (max 500)</div>
+  </div>
+  <div class="text-muted" style="margin-top:12px">{{ records|length }} record(s) shown (max 500)</div>
   {% else %}
   <div class="empty-state"><div class="icon">📋</div><h3>No logs found</h3><p>Try adjusting the date range or filters.</p></div>
   {% endif %}

@@ -1,68 +1,98 @@
 {% extends "base.html" %}
-{% block title %}{% if show=='shortlisted' %}Shortlisted{% elif show=='hired' %}Hired{% elif show=='rejected' %}Rejected{% else %}Applications{% endif %}{% endblock %}
-{% block page_title %}{% if show=='shortlisted' %}Shortlisted Candidates{% elif show=='hired' %}Hired Candidates{% elif show=='rejected' %}Rejected Candidates{% else %}Job Applications{% endif %}{% endblock %}
+{% block title %}Applications{% endblock %}
+{% block page_title %}Applications{% endblock %}
 {% block content %}
+{% if session.user_role in ('Admin','HR','HR Manager') and screening_rule %}
+<div class="card fade-in" style="margin-bottom:16px;padding:14px 18px;border-left:4px solid var(--g400)">
+  <div style="font-size:13px;font-weight:600;margin-bottom:6px">🤖 Auto-shortlisting rule</div>
+  <div style="font-size:13px;line-height:1.7;color:var(--text-primary)">
+    {{ screening_rule.formula }}<br>
+    <strong>Match score</strong> = {{ screening_rule.weights }}
+  </div>
+  <div style="font-size:12px;color:var(--text-secondary);margin-top:6px;line-height:1.6">
+    Scoring runs when an application has enough evidence: a cover letter longer than
+    {{ screening_rule.min_cover_letter_chars }} characters or readable résumé text.
+    Applications without enough evidence stay <strong>New</strong> and are flagged
+    <strong>Manual Review Required</strong> — AI never rejects a candidate.
+    Manually added applications are not auto-scored; HR shortlisting overrides AI.
+  </div>
+</div>
+{% endif %}
 <div class="card fade-in">
   <div class="sec-title">
-    <div style="display:flex;gap:4px;flex-wrap:wrap">
-      <a class="btn btn-sm {{ 'btn-amber' if show=='shortlisted' else 'btn-outline-secondary' }}" href="{{ url_for('recruitment.list_applications', show='shortlisted') }}">⭐ Shortlisted</a>
-      <a class="btn btn-sm {{ 'btn-primary' if show=='active' else 'btn-outline-secondary' }}" href="{{ url_for('recruitment.list_applications', show='active') }}">Active</a>
-      <a class="btn btn-sm {{ 'btn-primary' if show=='hired' else 'btn-outline-secondary' }}" href="{{ url_for('recruitment.list_applications', show='hired') }}">Hired</a>
-      <a class="btn btn-sm {{ 'btn-primary' if show=='rejected' else 'btn-outline-secondary' }}" href="{{ url_for('recruitment.list_applications', show='rejected') }}">Rejected</a>
-    </div>
     <div>
-      <form method="GET" style="display:flex;gap:8px;align-items:center">
-        <input type="hidden" name="show" value="{{ show }}">
-        <select class="form-input" name="job" style="width:auto">
-          <option value="">All Jobs</option>
+      <form method="GET" class="application-filters">
+        <select class="form-input" name="type" style="width:auto" onchange="this.form.submit()">
+          <option value="">Internal &amp; External Applications</option>
+          <option value="Internal" {{ 'selected' if type_filter=='Internal' }}>Internal</option>
+          <option value="External" {{ 'selected' if type_filter=='External' }}>External</option>
+        </select>
+        <select class="form-input" name="job" style="width:auto" onchange="this.form.submit()">
+          <option value="">All Positions</option>
           {% for j in job_postings %}
           <option value="{{ j.posting_id }}" {{ 'selected' if request.args.get('job')==j.posting_id|string }}>{{ j.title }}</option>
           {% endfor %}
         </select>
-        {% if show in ('shortlisted','active') %}
-        <select class="form-input" name="status" style="width:auto">
+        <select class="form-input" name="status" style="width:auto" onchange="this.form.submit()">
           <option value="">All Status</option>
           <option value="New" {{ 'selected' if status_filter=='New' }}>New</option>
           <option value="Shortlisted" {{ 'selected' if status_filter=='Shortlisted' }}>Shortlisted</option>
           <option value="Interview" {{ 'selected' if status_filter=='Interview' }}>Interview</option>
-          <option value="Offered" {{ 'selected' if status_filter=='Offered' }}>Offered</option>
+          <option value="Rejected" {{ 'selected' if status_filter=='Rejected' }}>Rejected</option>
         </select>
-        {% endif %}
-        <select class="form-input" name="branch" style="width:auto">
+        <select class="form-input" name="branch" style="width:auto" id="app-branch" onchange="cascadeApplications(); this.form.submit()">
           <option value="">All Branches</option>
           {% for b in branches %}
           <option value="{{ b.branch_id }}" {{ 'selected' if request.args.get('branch')==b.branch_id|string }}>{{ b.name }}</option>
           {% endfor %}
         </select>
-        <button class="btn btn-sm btn-primary" type="submit">Filter</button>
+        <select class="form-input" name="dept" style="width:auto" id="app-dept" onchange="cascadeApplications(); this.form.submit()">
+          <option value="">All Departments</option>
+          {% for d in departments %}
+          <option value="{{ d.department_id }}" data-branch="{{ d.branch_id }}" {{ 'selected' if request.args.get('dept')==d.department_id|string }}>{{ d.department_name }}</option>
+          {% endfor %}
+        </select>
+        <select class="form-input" name="job" style="width:auto" id="app-job" onchange="this.form.submit()">
+          <option value="">All Positions</option>
+          {% for j in job_postings %}
+          <option value="{{ j.posting_id }}" data-branch="{{ j.branch_id }}" data-dept="{{ j.department_id }}" {{ 'selected' if request.args.get('job')==j.posting_id|string }}>{{ j.title }}</option>
+          {% endfor %}
+        </select>
       </form>
     </div>
   </div>
 
   {% if applications %}
   <form id="bulk-form" method="POST" action="{{ url_for('recruitment.auto_assign_preview') }}">
-    <table class="tbl">
+    <div class="table-scroll application-table-scroll" tabindex="0" aria-label="Applications table. Scroll horizontally to see all columns.">
+    <table class="tbl application-table">
       <thead>
         <tr>
-          {% if show=='shortlisted' and session.user_role in ('Admin','HR','HR Manager','HR Director') %}
+          {% if status_filter=='Shortlisted' and session.user_role in ('Admin','HR','HR Manager') %}
           <th style="width:40px"><input type="checkbox" id="select-all" onchange="toggleAll(this)"></th>
           {% endif %}
-          <th>ID</th><th>Name</th><th>Email</th><th>Position</th><th>Branch</th><th>Department</th><th>Status</th><th>AI Score</th><th>Applied</th><th></th>
+          <th>ID</th><th>Name</th><th>Email</th><th>Type</th><th>Position</th><th>Branch</th><th>Department</th><th>Status</th><th>AI Score</th><th>Applied</th><th></th>
         </tr>
       </thead>
       <tbody>
         {% for a in applications %}
         <tr>
-          {% if show=='shortlisted' and session.user_role in ('Admin','HR','HR Manager','HR Director') %}
+          {% if status_filter=='Shortlisted' and session.user_role in ('Admin','HR','HR Manager') %}
           <td><input type="checkbox" name="application_ids" value="{{ a.application_id }}" class="app-checkbox" onchange="updateBulkBar()"></td>
           {% endif %}
           <td style="color:var(--text-secondary);font-size:13px">{{ a.application_id }}</td>
           <td><strong>{{ a.applicant_name }}</strong></td>
           <td>{{ a.applicant_email }}</td>
+          <td>
+            {% if a.applicant_type=='Internal' %}<span class="badge badge-blue">Internal</span>
+            {% elif a.applicant_type=='External' %}<span class="badge badge-gray">External</span>
+            {% else %}<span class="badge badge-gray">{{ a.applicant_type or '—' }}</span>
+            {% endif %}
+          </td>
           <td>{{ a.job_title }}</td>
           <td>{{ a.branch_name or '—' }}</td>
           <td>{{ a.department_name }}</td>
-          <td><span class="badge {% if a.status=='Hired' %}badge-green{% elif a.status=='Accepted' %}badge-green{% elif a.status=='Rejected' %}badge-red{% elif a.status=='Interview' %}badge-blue{% elif a.status=='Offered' %}badge-blue{% elif a.status=='Shortlisted' %}badge-amber{% endif %}">{{ a.status }}</span></td>
+          <td><span class="badge {% if a.status=='Hired' %}badge-green{% elif a.status=='Accepted' %}badge-green{% elif a.status=='Rejected' %}badge-red{% elif a.status=='Offer Expired' %}badge-red{% elif a.status=='Interview' %}badge-blue{% elif a.status=='Offered' %}badge-blue{% elif a.status=='Shortlisted' %}badge-amber{% endif %}">{{ a.status }}</span>{% if a.screening_status == 'Manual Review Required' %}<br><span class="badge badge-amber" style="font-size:10px;margin-top:2px">Manual Review</span>{% endif %}</td>
           <td>
             {% if a.ai_score is not none %}
             <span style="font-weight:600;color:{% if a.ai_score >= 30 %}#1a6b3a{% elif a.ai_score >= 15 %}#b8860b{% else %}#a32d2d{% endif %}">
@@ -78,13 +108,14 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </form>
   {% else %}
-  <div class="empty-state"><div class="icon">📄</div><h3>No {{ show }} applications found</h3></div>
+  <div class="empty-state"><div class="icon">📄</div><h3>No applications found</h3></div>
   {% endif %}
 </div>
 
-{% if show=='shortlisted' and session.user_role in ('Admin','HR','HR Manager','HR Director') %}
+{% if status_filter=='Shortlisted' and session.user_role in ('Admin','HR','HR Manager') %}
 <div id="bulk-bar" class="bulk-bar" style="display:none">
   <div style="display:flex;align-items:center;gap:16px">
     <span style="font-weight:600"><span id="selected-count">0</span> selected</span>
@@ -93,12 +124,31 @@
   </div>
 </div>
 
-<div id="auto-assign-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10000;justify-content:center;align-items:center">
+<div id="auto-assign-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10000;justify-content:center;align-items:flex-start;padding:8vh 16px 16px;overflow-y:auto">
   <div style="background:#fff;border-radius:12px;padding:24px;max-width:700px;width:90%;max-height:80vh;overflow-y:auto">
     <h3 style="margin:0 0 16px">Auto-Assign Interview Slots</h3>
-    <p style="color:var(--text-secondary);font-size:14px;margin-bottom:16px">The system will auto-assign interview dates and times based on the <a href="{{ url_for('recruitment.interview_policy') }}" target="_blank">Interview Policy ↗</a>. Interviewer leave dates are automatically excluded.</p>
+    <p style="color:var(--text-secondary);font-size:14px;margin-bottom:12px">The system will auto-assign interview dates and times based on the <a href="{{ url_for('recruitment.interview_policy') }}" target="_blank">Interview Policy ↗</a>. Interviewer leave dates are automatically excluded.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <div>
+        <label class="label" style="font-size:12px">Format *</label>
+        <select class="form-input" id="aa-format" style="width:auto">
+          <option value="">Select format</option>
+          <option value="Physical">Physical (posting branch venue)</option>
+          <option value="Virtual">Virtual (meeting link)</option>
+        </select>
+      </div>
+      <div id="aa-link-group" style="display:none">
+        <label class="label" style="font-size:12px">Meeting Link (Virtual) *</label>
+        <input class="form-input" id="aa-link" placeholder="https://meet.example.com/..." style="min-width:240px">
+      </div>
+      <div id="aa-venue-group" style="display:none">
+        <label class="label" style="font-size:12px">Venue (optional)</label>
+        <input class="form-input" id="aa-venue" placeholder="e.g. Block A Meeting Room, Level 3" style="min-width:240px">
+      </div>
+    </div>
+    <p class="hint" style="font-size:11px;color:var(--text-secondary);margin:-4px 0 12px">Physical interviews use the posting branch's address as the location and only interviewers from that branch. Virtual interviews use the company-wide roster; the manager who requested the position is assigned first. You can optionally add a venue (e.g. Block A Meeting Room).</p>
     <div id="assign-preview" style="margin-bottom:16px">
-      <div style="text-align:center;padding:20px;color:var(--text-secondary)">Calculating available slots...</div>
+      <div style="text-align:center;padding:20px;color:var(--text-secondary)">Select a format, then reopen to calculate slots...</div>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button type="button" class="btn btn-outline-secondary" onclick="closeAutoAssignModal()">Cancel</button>
@@ -111,7 +161,34 @@
 
 {% block scripts %}
 <script>
-{% if show=='shortlisted' and session.user_role in ('Admin','HR','HR Manager','HR Director') %}
+function cascadeApplications() {
+  var branchSel = document.getElementById('app-branch');
+  var deptSel = document.getElementById('app-dept');
+  var jobSel = document.getElementById('app-job');
+  if (!branchSel || !deptSel || !jobSel) return;
+
+  var branchId = branchSel.value;
+  var deptId = deptSel.value;
+
+  var deptValid = false;
+  deptSel.querySelectorAll('option[data-branch]').forEach(function(opt) {
+    var show = !branchId || opt.getAttribute('data-branch') === branchId;
+    opt.style.display = show ? '' : 'none';
+    if (show && opt.selected) deptValid = true;
+  });
+  if (!deptValid && deptSel.value !== '') deptSel.value = '';
+
+  var jobValid = false;
+  jobSel.querySelectorAll('option[data-branch]').forEach(function(opt) {
+    var show = (!branchId || opt.getAttribute('data-branch') === branchId)
+            && (!deptSel.value || opt.getAttribute('data-dept') === deptSel.value);
+    opt.style.display = show ? '' : 'none';
+    if (show && opt.selected) jobValid = true;
+  });
+  if (!jobValid && jobSel.value !== '') jobSel.value = '';
+}
+document.addEventListener('DOMContentLoaded', cascadeApplications);
+{% if status_filter=='Shortlisted' and session.user_role in ('Admin','HR','HR Manager') %}
 function toggleAll(el) {
   document.querySelectorAll('.app-checkbox').forEach(function(cb) { cb.checked = el.checked; });
   updateBulkBar();
@@ -134,16 +211,41 @@ function clearSelection() {
   updateBulkBar();
 }
 var assignedData = [];
+function aaFormatSync() {
+  var fmt = document.getElementById('aa-format').value;
+  var group = document.getElementById('aa-link-group');
+  if (group) group.style.display = fmt === 'Virtual' ? '' : 'none';
+  var venueGroup = document.getElementById('aa-venue-group');
+  if (venueGroup) venueGroup.style.display = fmt === 'Physical' ? '' : 'none';
+}
 function showAutoAssignModal() {
   var checked = document.querySelectorAll('.app-checkbox:checked');
   if (checked.length === 0) return;
-  var ids = Array.from(checked).map(function(cb) { return cb.value; });
+  // Open the modal first so validation messages are visible.
   document.getElementById('auto-assign-modal').style.display = 'flex';
-  document.getElementById('assign-preview').innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-secondary)">Calculating available slots...</div>';
+  var fmt = document.getElementById('aa-format').value;
+  if (!fmt) {
+    document.getElementById('assign-preview').innerHTML = '<div style="color:#a32d2d;padding:12px">Select an interview format (Physical or Virtual) first.</div>';
+    return;
+  }
+  if (fmt === 'Virtual' && !document.getElementById('aa-link').value.trim()) {
+    document.getElementById('assign-preview').innerHTML = '<div style="color:#a32d2d;padding:12px">A meeting link is required for a virtual interview.</div>';
+    return;
+  }
+  var ids = Array.from(checked).map(function(cb) { return cb.value; });
+  // Keep an existing preview on screen while recalculating so the dialog
+  // height (and the centered overlay) does not jump on every refresh.
+  if (!assignedData.length) {
+    document.getElementById('assign-preview').innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-secondary)">Calculating available slots...</div>';
+  }
+  var body = 'application_ids=' + ids.join('&application_ids=')
+    + '&format=' + encodeURIComponent(fmt)
+    + '&meeting_link=' + encodeURIComponent(document.getElementById('aa-link').value.trim())
+    + '&venue=' + encodeURIComponent(document.getElementById('aa-venue').value.trim());
   fetch('{{ url_for("recruitment.auto_assign_preview") }}', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'application_ids=' + ids.join('&application_ids=')
+    body: body
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
@@ -152,11 +254,18 @@ function showAutoAssignModal() {
       return;
     }
     assignedData = data.assignments;
-    var html = '<table class="tbl"><thead><tr><th>#</th><th>Candidate</th><th>Date</th><th>Time</th><th>Interviewer</th><th>Type</th></tr></thead><tbody>';
+    var html = '<table class="tbl"><thead><tr><th>#</th><th>Candidate</th><th>Date</th><th>Time</th><th>Interviewer</th><th>Format</th></tr></thead><tbody>';
     data.assignments.forEach(function(a, i) {
-      html += '<tr><td>' + (i+1) + '</td><td><strong>' + a.applicant_name + '</strong></td><td>' + a.date + '</td><td>' + a.time + '</td><td>' + a.interviewer + '</td><td>' + a.type + '</td></tr>';
+      html += '<tr><td>' + (i+1) + '</td><td><strong>' + a.applicant_name + '</strong></td><td>' + a.date + '</td><td>' + a.time + '</td><td>' + a.interviewer + '</td><td>' + a.format + '</td></tr>';
     });
     html += '</tbody></table>';
+    if (data.venue) {
+      var locText = data.location && data.location !== data.venue ? data.location + ' — ' + data.venue : data.venue;
+      html += '<div style="margin-top:8px;padding:8px 12px;background:var(--bg-secondary);border-radius:6px;font-size:12px;color:var(--text-secondary)">📍 ' + locText + '</div>';
+    }
+    if (data.meeting_link) {
+      html += '<div style="margin-top:8px;padding:8px 12px;background:var(--bg-secondary);border-radius:6px;font-size:12px;color:var(--text-secondary)">🔗 ' + data.meeting_link + '</div>';
+    }
     if (data.warnings && data.warnings.length > 0) {
       html += '<div style="margin-top:8px;padding:8px 12px;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;font-size:13px;color:#856404">' + data.warnings.join('<br>') + '</div>';
     }
@@ -174,9 +283,52 @@ function confirmAutoAssign() {
   document.getElementById('confirm-assign-btn').disabled = true;
   document.getElementById('confirm-assign-btn').textContent = 'Scheduling...';
   var form = document.getElementById('bulk-form');
+  function setHidden(name, value) {
+    var input = form.querySelector('input[name="' + name + '"]');
+    if (!input) {
+      input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      form.appendChild(input);
+    }
+    input.value = value;
+  }
+  setHidden('format', document.getElementById('aa-format').value);
+  setHidden('meeting_link', document.getElementById('aa-link').value.trim());
+  setHidden('venue', document.getElementById('aa-venue').value.trim());
   form.action = '{{ url_for("recruitment.auto_assign_confirm") }}';
   form.submit();
 }
+(function() {
+  var fmt = document.getElementById('aa-format');
+  var link = document.getElementById('aa-link');
+  function hasSelection() {
+    return document.querySelectorAll('.app-checkbox:checked').length > 0;
+  }
+  if (fmt) {
+    fmt.addEventListener('change', function() {
+      aaFormatSync();
+      // Recalculate the preview whenever the format changes while
+      // candidates are still selected and the modal is open.
+      if (hasSelection() && document.getElementById('auto-assign-modal').style.display === 'flex') {
+        showAutoAssignModal();
+      }
+    });
+  }
+  var linkDebounce = null;
+  if (link) {
+    link.addEventListener('input', function() {
+      if (!(fmt && fmt.value === 'Virtual' && hasSelection()
+          && document.getElementById('auto-assign-modal').style.display === 'flex')) {
+        return;
+      }
+      // Debounce: recalculate only after the user pauses typing, so the
+      // preview (and the dialog) does not jump on every keystroke.
+      if (linkDebounce) clearTimeout(linkDebounce);
+      linkDebounce = setTimeout(function() { showAutoAssignModal(); }, 500);
+    });
+  }
+})();
 {% endif %}
 
 (function() {
@@ -185,16 +337,17 @@ function confirmAutoAssign() {
       .then(function(r) { return r.text(); })
       .then(function(html) {
         var doc = new DOMParser().parseFromString(html, 'text/html');
-        var newTable = doc.querySelector('.tbl');
-        if (!newTable) return;
-        var currentTable = document.querySelector('.tbl');
+        var newTable = doc.querySelector('.application-table');
+        var newTableWrap = doc.querySelector('.application-table-scroll');
+        if (!newTable || !newTableWrap) return;
+        var currentTable = document.querySelector('.application-table');
         var emptyState = document.querySelector('.empty-state');
         if (currentTable) {
           currentTable.querySelector('tbody').innerHTML = newTable.querySelector('tbody').innerHTML;
         } else if (emptyState) {
           var card = emptyState.closest('.card');
           if (card) {
-            emptyState.replaceWith(newTable);
+            emptyState.replaceWith(newTableWrap);
           }
         }
       })

@@ -39,6 +39,7 @@
 <div class="card fade-in">
   <div class="sec-title">Audit Trail</div>
   {% if logs %}
+  <div class="table-scroll" tabindex="0" aria-label="Audit trail table. Scroll horizontally to see all columns.">
   <table class="tbl">
     <thead>
       <tr>
@@ -74,20 +75,27 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 
   <!-- Pagination -->
-  <div class="pagination">
+  {% if total_pages > 1 %}
+  <div class="pagination" aria-label="Audit log pages">
     {% if page > 1 %}
-    <a class="page-btn" href="?page={{ page-1 }}&module={{ module }}&status={{ status }}&from={{ date_from }}&to={{ date_to }}&q={{ search }}">← Prev</a>
+    <a class="page-btn" href="{{ url_for('audit.index', page=page-1, module=module, action=action, status=status, **{'from': date_from, 'to': date_to, 'q': search}) }}">← Prev</a>
     {% endif %}
-    {% for p in range(1, total_pages+1) %}
+    {% for p in page_numbers %}
+    {% if p %}
     <a class="page-btn {% if p==page %}active{% endif %}"
-       href="?page={{ p }}&module={{ module }}&status={{ status }}&from={{ date_from }}&to={{ date_to }}&q={{ search }}">{{ p }}</a>
+       href="{{ url_for('audit.index', page=p, module=module, action=action, status=status, **{'from': date_from, 'to': date_to, 'q': search}) }}">{{ p }}</a>
+    {% else %}
+    <span class="page-ellipsis" aria-hidden="true">…</span>
+    {% endif %}
     {% endfor %}
     {% if page < total_pages %}
-    <a class="page-btn" href="?page={{ page+1 }}&module={{ module }}&status={{ status }}&from={{ date_from }}&to={{ date_to }}&q={{ search }}">Next →</a>
+    <a class="page-btn" href="{{ url_for('audit.index', page=page+1, module=module, action=action, status=status, **{'from': date_from, 'to': date_to, 'q': search}) }}">Next →</a>
     {% endif %}
   </div>
+  {% endif %}
   {% else %}
   <div class="empty-state"><div class="icon">🔍</div><h3>No logs found</h3><p>Try adjusting filters.</p></div>
   {% endif %}

@@ -11,6 +11,7 @@ from app.database import query, execute
 from app.payroll.calculator import (calculate_proration, calculate_epf,
                                      calculate_socso, calculate_eis,
                                      calculate_pcb, calculate_ot_or_leave)
+from app.payroll.helpers import increment_landing_map
 
 
 def _months_to_refresh(company_id):
@@ -53,6 +54,11 @@ def generate_payroll_for_company(company_id, month, year, generated_by=None):
     """, (company_id, month, year))
     finalised_eids = {r['employee_id'] for r in finalised} if finalised else set()
 
+    employees = query("SELECT * FROM Employee WHERE company_id=? AND is_active=1",
+                      (company_id,))
+    today = date.today()
+    landing_map = increment_landing_map(company_id, employees, today)
+
     # Unlink invoices that pointed at Draft payrolls about to be deleted
     execute("""UPDATE Invoice SET payroll_id = NULL
                WHERE payroll_id IN (
@@ -68,8 +74,6 @@ def generate_payroll_for_company(company_id, month, year, generated_by=None):
                  AND employee_id IN (SELECT employee_id FROM Employee WHERE company_id=?)""",
             (month, year, company_id))
 
-    employees = query("SELECT * FROM Employee WHERE company_id=? AND is_active=1",
-                      (company_id,))
     count = 0
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -78,16 +82,20 @@ def generate_payroll_for_company(company_id, month, year, generated_by=None):
         if eid in finalised_eids:
             continue
 
-        # Approved increment (latest by year)
-        inc = query("""
-            SELECT * FROM Salary_Increment
-            WHERE employee_id=? AND status='Approved'
-            ORDER BY period_year DESC, increment_id DESC
-            LIMIT 1
-        """, (eid,), one=True)
-        if inc:
-            effective_salary = inc['new_salary']
-            salary_inc_amt = inc['new_salary'] - inc['old_salary']
+        # Approved increment: new salary applies from the landing month; the
+        # increment amount line shows only on the landing month itself.
+        land = landing_map.get(eid)
+        if land:
+            inc = land[2]
+            if (year, month) == (land[1], land[0]):
+                effective_salary = inc['new_salary']
+                salary_inc_amt = inc['new_salary'] - inc['old_salary']
+            elif (year, month) > (land[1], land[0]):
+                effective_salary = inc['new_salary']
+                salary_inc_amt = 0.0
+            else:
+                effective_salary = inc['old_salary']
+                salary_inc_amt = 0.0
         else:
             effective_salary = emp['base_salary']
             salary_inc_amt = 0.0
@@ -104,7 +112,7 @@ def generate_payroll_for_company(company_id, month, year, generated_by=None):
         ot_hours = att['ot'] if att and att['ot'] else 0
 
         # Approved invoice claims not yet linked to a payroll
-        claims = query("""SELECT SUM(total_amount) as total
+        claims = query("""SELECT SUM(COALESCE(total_amount_myr, total_amount)) as total
                           FROM Invoice
                           WHERE employee_id=? AND status='Approved' AND payroll_id IS NULL""",
                        (eid,), one=True)

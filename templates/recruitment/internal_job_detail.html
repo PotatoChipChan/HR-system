@@ -11,7 +11,7 @@
       <p><strong>Department:</strong> {{ posting.department_name }} &middot; <strong>Branch:</strong> {{ posting.branch_name }}</p>
       <p><strong>Type:</strong> {{ posting.employment_type }} &middot; <strong>Status:</strong> <span class="badge badge-green">Open</span></p>
       {% if posting.min_salary %}<p><strong>Salary:</strong> RM{{ posting.min_salary }}{% if posting.max_salary %} – RM{{ posting.max_salary }}{% endif %}</p>{% endif %}
-      <p><strong>Audience:</strong> Internal &middot; <strong>Posted:</strong> {{ posting.created_at[:10] }}</p>
+      <p><strong>Audience:</strong> {{ posting.target_audience }} &middot; <strong>Posted:</strong> {{ posting.created_at[:10] }}</p>
     </div>
     <div>
       <form method="POST" action="{{ url_for('recruitment.internal_apply', pid=posting.posting_id) }}" enctype="multipart/form-data">

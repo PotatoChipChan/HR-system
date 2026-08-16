@@ -87,12 +87,75 @@ def migrate_scheduler_lock_table():
     print("[OK] scheduler_lock table migration completed.")
 
 
+def migrate_hr_director_to_hr_manager():
+    """Replace the retired HR Director role with HR Manager.
+
+    Existing employees are reassigned transactionally and their active
+    permissions are refreshed from HR Manager's Admin-equivalent role map
+    before the obsolete role is deleted. Safe to re-run after the role has
+    already been removed.
+    """
+    con = get_connection()
+    cur = con.cursor()
+    try:
+        legacy_role = cur.execute(
+            "SELECT role_id FROM Role WHERE role_name='HR Director'"
+        ).fetchone()
+        if not legacy_role:
+            con.close()
+            return
+
+        hr_manager_role = cur.execute(
+            "SELECT role_id FROM Role WHERE role_name='HR Manager'"
+        ).fetchone()
+        if not hr_manager_role:
+            raise RuntimeError('HR Manager role is required before retiring HR Director.')
+
+        legacy_role_id = legacy_role[0]
+        hr_manager_role_id = hr_manager_role[0]
+        employee_rows = cur.execute(
+            "SELECT employee_id FROM Employee WHERE role_id=?", (legacy_role_id,)
+        ).fetchall()
+
+        for employee in employee_rows:
+            employee_id = employee[0]
+            cur.execute("UPDATE Employee SET role_id=? WHERE employee_id=?",
+                        (hr_manager_role_id, employee_id))
+            cur.execute("""UPDATE Employee_Permission
+                           SET is_active=0, revoked_at=datetime('now')
+                           WHERE employee_id=? AND is_active=1""", (employee_id,))
+            cur.execute("""INSERT INTO Employee_Permission
+                           (employee_id, permission_id, is_active, reason)
+                           SELECT ?, permission_id, 1, 'role_migration'
+                           FROM Role_Permission WHERE role_id=?
+                           ON CONFLICT(employee_id, permission_id) DO UPDATE SET
+                               is_active=1,
+                               revoked_at=NULL,
+                               reason='role_migration'""",
+                        (employee_id, hr_manager_role_id))
+
+        cur.execute("DELETE FROM Role WHERE role_id=?", (legacy_role_id,))
+        con.commit()
+        print(f"[MIGRATION] Retired HR Director role; reassigned {len(employee_rows)} employee(s) to HR Manager.")
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+
+
 def migrate_contract_security():
     """Rebuild the Contract table adding secure offer-acceptance columns
     (accept_token, token_expires_at, accepted_at) and the 'Declined' status.
 
     SQLite cannot ALTER a CHECK constraint, so existing databases get a
-    transactional rebuild (copy → drop → rename). Idempotent – safe to re-run."""
+    verified transactional rebuild via migration_framework.rebuild_table()
+    (row-count parity, full-row preservation, PRAGMA foreign_key_check, and
+    index/trigger restoration are asserted inside the framework). A
+    timestamped backup is created before the rebuild; no-op runs create no
+    backup. Idempotent - safe to re-run."""
+    from migration_framework import backup_before_migration, rebuild_table
+
     con = get_connection()
     cols = [r[1] for r in con.execute("PRAGMA table_info(Contract)")]
     if 'accept_token' in cols:
@@ -100,12 +163,11 @@ def migrate_contract_security():
         print("[OK] Contract security migration already applied.")
         return
 
-    from datetime import datetime
     print("[MIGRATION] Rebuilding Contract table with accept_token columns ...")
-    con.execute("PRAGMA foreign_keys = OFF")
-    con.execute("BEGIN IMMEDIATE")
+    backup_path = backup_before_migration(DB_PATH)
+    print(f"[BACKUP] Created backup at {backup_path}")
     try:
-        con.execute("""
+        rebuild_table(con, 'Contract', """
             CREATE TABLE Contract_new (
                 contract_id       INTEGER PRIMARY KEY AUTOINCREMENT,
                 application_id    INTEGER NOT NULL UNIQUE,
@@ -132,23 +194,8 @@ def migrate_contract_security():
                 FOREIGN KEY (department_id)   REFERENCES Department(department_id)
             )
         """)
-        common = ("contract_id", "application_id", "employee_id", "offer_date",
-                  "start_date", "position", "department_id", "work_start_time",
-                  "work_end_time", "base_salary", "employment_type",
-                  "contract_doc_path", "signed_doc_path", "status",
-                  "created_at", "signed_at")
-        con.execute(f"""
-            INSERT INTO Contract_new ({', '.join(common)})
-            SELECT {', '.join(common)} FROM Contract
-        """)
-        con.execute("DROP TABLE Contract")
-        con.execute("ALTER TABLE Contract_new RENAME TO Contract")
         con.commit()
-    except Exception:
-        con.rollback()
-        raise
     finally:
-        con.execute("PRAGMA foreign_keys = ON")
         con.close()
     print("[OK] Contract security migration completed.")
 
@@ -235,6 +282,16 @@ def migrate_recruitment_audience():
             if null_rows:
                 print(f"[MIGRATION] {null_rows} application(s) without a posting "
                       f"kept company_id NULL (Admin-only until assigned)")
+
+        if 'emergency_contact_name' not in ja_cols:
+            print("[MIGRATION] Adding emergency_contact_name to Job_Application ...")
+            cur.execute("""ALTER TABLE Job_Application ADD COLUMN
+                           emergency_contact_name TEXT""")
+
+        if 'emergency_contact_no' not in ja_cols:
+            print("[MIGRATION] Adding emergency_contact_no to Job_Application ...")
+            cur.execute("""ALTER TABLE Job_Application ADD COLUMN
+                           emergency_contact_no TEXT""")
 
         cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_job_app_internal_unique
                        ON Job_Application(posting_id, internal_employee_id)
@@ -703,6 +760,465 @@ def migrate_attendance_request_table():
     con.close()
     print("[OK] Attendance_Request table migration completed.")
 
+def _ensure_attendance_indexes(con):
+    """Recreate the standard Attendance indexes if they are missing.
+
+    Table-rebuild migrations (DROP + RENAME) silently drop the table's
+    indexes, and schema.sql's CREATE INDEX statements only run during full
+    schema application. This helper restores them idempotently.
+    """
+    con.execute("CREATE INDEX IF NOT EXISTS idx_attendance_employee ON Attendance(employee_id)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_attendance_checkin  ON Attendance(check_in)")
+
+
+def migrate_attendance_status():
+    """Extend Attendance.status CHECK to include 'Rejected'.
+
+    The pending-review flow writes status='Rejected' (attendance/routes.py),
+    but older databases only allow ('Pending','Approved','Flagged'). SQLite
+    cannot ALTER a CHECK constraint, so existing databases get a verified
+    transactional rebuild via migration_framework.rebuild_table() (row-count
+    parity, full-row preservation, PRAGMA foreign_key_check, and index/trigger
+    restoration are asserted inside the framework).
+
+    Already-migrated databases get their indexes restored (historical
+    rebuilds dropped them). Idempotent - safe to re-run.
+    """
+    from migration_framework import backup_before_migration, rebuild_table
+
+    con = get_connection()
+    row = con.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='Attendance'"
+    ).fetchone()
+    if row and 'Rejected' in (row['sql'] or ''):
+        _ensure_attendance_indexes(con)
+        con.commit()
+        con.close()
+        print("[OK] Attendance status migration already applied (indexes verified).")
+        return
+
+    print("[MIGRATION] Rebuilding Attendance table with 'Rejected' status ...")
+    backup_path = backup_before_migration(DB_PATH)
+    print(f"[BACKUP] Created backup at {backup_path}")
+    try:
+        rebuild_table(con, 'Attendance', """
+            CREATE TABLE Attendance_new (
+                attendance_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id      INTEGER NOT NULL,
+                branch_id        INTEGER NOT NULL,
+                check_in         TEXT NOT NULL,
+                check_out        TEXT,
+                hours_worked     REAL,
+                overtime_hours   REAL DEFAULT 0.00,
+                confidence_score REAL,
+                status           TEXT DEFAULT 'Pending' CHECK(status IN ('Pending','Approved','Rejected','Flagged')),
+                is_manual_entry  INTEGER DEFAULT 0,
+                manual_reason    TEXT,
+                corrected_by     INTEGER,
+                corrected_at     TEXT,
+                created_at       TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (employee_id)  REFERENCES Employee(employee_id),
+                FOREIGN KEY (branch_id)    REFERENCES Branch(branch_id),
+                FOREIGN KEY (corrected_by) REFERENCES Employee(employee_id)
+            )
+        """)
+        _ensure_attendance_indexes(con)
+        con.commit()
+    finally:
+        con.close()
+    print("[OK] Attendance status migration completed.")
+
+
+def migrate_vacancy_openings():
+    """Add opening-count tracking to recruitment:
+
+    - Vacancy_Request: requested_openings, approved_openings
+    - Job_Posting: approved_openings, reserved_openings, filled_openings,
+      status CHECK extended with 'Partially Filled' (verified table rebuild)
+    - Opening_Reservation: opening-reservation ledger
+
+    Backfills (idempotent): existing postings get approved_openings=1
+    (filled_openings=1 where status='Filled'); existing requests get
+    requested_openings=1 (approved_openings=1 where status='Approved');
+    a Filled reservation row is created for every existing Hired application.
+
+    Uses migration_framework (timestamped backup before the rebuild, row
+    preservation, PRAGMA foreign_key_check, index/trigger restoration).
+    Idempotent - safe to re-run.
+    """
+    from migration_framework import backup_before_migration, rebuild_table
+
+    con = get_connection()
+    row = con.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='Job_Posting'"
+    ).fetchone()
+    if row and 'Partially Filled' in (row['sql'] or ''):
+        con.close()
+        print("[OK] Vacancy openings migration already applied.")
+        return
+
+    print("[MIGRATION] Adding vacancy opening ledger ...")
+    backup_path = backup_before_migration(DB_PATH)
+    print(f"[BACKUP] Created backup at {backup_path}")
+    try:
+        rebuild_table(con, 'Job_Posting', """
+            CREATE TABLE Job_Posting_new (
+                posting_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                title           TEXT NOT NULL,
+                position_id     INTEGER REFERENCES Position(position_id),
+                department_id   INTEGER,
+                branch_id       INTEGER,
+                employment_type TEXT CHECK(employment_type IN ('Full-Time','Part-Time','Contract')),
+                min_salary      REAL,
+                max_salary      REAL,
+                description     TEXT,
+                requirements    TEXT,
+                status          TEXT DEFAULT 'Open' CHECK(status IN ('Open','Partially Filled','Closed','Filled')),
+                target_audience TEXT NOT NULL DEFAULT 'Both' CHECK(target_audience IN ('Internal','External','Both')),
+                posted_by       INTEGER,
+                created_at      TEXT DEFAULT (datetime('now')),
+                closed_at       TEXT,
+                FOREIGN KEY (department_id) REFERENCES Department(department_id),
+                FOREIGN KEY (branch_id)     REFERENCES Branch(branch_id),
+                FOREIGN KEY (posted_by)     REFERENCES Employee(employee_id)
+            )
+        """)
+
+        con.execute("ALTER TABLE Job_Posting ADD COLUMN approved_openings INTEGER NOT NULL DEFAULT 1")
+        con.execute("ALTER TABLE Job_Posting ADD COLUMN reserved_openings INTEGER NOT NULL DEFAULT 0")
+        con.execute("ALTER TABLE Job_Posting ADD COLUMN filled_openings INTEGER NOT NULL DEFAULT 0")
+        con.execute("UPDATE Job_Posting SET filled_openings=1 WHERE status='Filled'")
+
+        con.execute("ALTER TABLE Vacancy_Request ADD COLUMN requested_openings INTEGER NOT NULL DEFAULT 1")
+        con.execute("ALTER TABLE Vacancy_Request ADD COLUMN approved_openings INTEGER")
+        con.execute("UPDATE Vacancy_Request SET approved_openings=1 WHERE status='Approved'")
+
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS Opening_Reservation (
+                reservation_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+                posting_id      INTEGER NOT NULL REFERENCES Job_Posting(posting_id),
+                application_id  INTEGER NOT NULL REFERENCES Job_Application(application_id),
+                contract_id     INTEGER REFERENCES Contract(contract_id),
+                status          TEXT NOT NULL DEFAULT 'Reserved'
+                                CHECK(status IN ('Reserved','Filled','Released')),
+                created_at      TEXT DEFAULT (datetime('now')),
+                released_at     TEXT,
+                release_reason  TEXT
+            )
+        """)
+        con.execute("""
+            INSERT INTO Opening_Reservation (posting_id, application_id, status)
+            SELECT posting_id, application_id, 'Filled'
+            FROM Job_Application
+            WHERE status='Hired' AND posting_id IS NOT NULL
+        """)
+        con.commit()
+    finally:
+        con.close()
+    print("[OK] Vacancy openings migration completed.")
+
+
+def migrate_job_posting_archive():
+    """Add the soft-delete 'Archived' status to Job_Posting:
+
+    - status CHECK extended with 'Archived' (verified table rebuild via
+      migration_framework: timestamped backup, row preservation, FK checks,
+      index/trigger restoration). Idempotent - safe to re-run.
+    - Backfill: postings currently 'Filled' are archived automatically
+      (status='Archived', closed_at set) so a fully filled job leaves the
+      active and closed lists without losing any record.
+    """
+    from migration_framework import backup_before_migration, rebuild_table
+
+    con = get_connection()
+    row = con.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='Job_Posting'"
+    ).fetchone()
+    if row and 'Archived' in (row['sql'] or ''):
+        con.close()
+        print("[OK] Job posting archive migration already applied.")
+        return
+
+    print("[MIGRATION] Adding Archived status to Job_Posting ...")
+    backup_path = backup_before_migration(DB_PATH)
+    print(f"[BACKUP] Created backup at {backup_path}")
+    try:
+        rebuild_table(con, 'Job_Posting', """
+            CREATE TABLE Job_Posting_new (
+                posting_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                title           TEXT NOT NULL,
+                position_id     INTEGER REFERENCES Position(position_id),
+                department_id   INTEGER,
+                branch_id       INTEGER,
+                employment_type TEXT CHECK(employment_type IN ('Full-Time','Part-Time','Contract')),
+                min_salary      REAL,
+                max_salary      REAL,
+                description     TEXT,
+                requirements    TEXT,
+                status          TEXT DEFAULT 'Open' CHECK(status IN ('Open','Partially Filled','Closed','Filled','Archived')),
+                target_audience TEXT NOT NULL DEFAULT 'Both' CHECK(target_audience IN ('Internal','External','Both')),
+                posted_by       INTEGER,
+                created_at      TEXT DEFAULT (datetime('now')),
+                closed_at       TEXT,
+                approved_openings INTEGER NOT NULL DEFAULT 1,
+                reserved_openings INTEGER NOT NULL DEFAULT 0,
+                filled_openings   INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (department_id) REFERENCES Department(department_id),
+                FOREIGN KEY (branch_id)     REFERENCES Branch(branch_id),
+                FOREIGN KEY (posted_by)     REFERENCES Employee(employee_id)
+            )
+        """)
+        con.execute("""
+            UPDATE Job_Posting SET status='Archived',
+                   closed_at=COALESCE(closed_at, datetime('now'))
+            WHERE status='Filled'
+        """)
+        con.commit()
+    finally:
+        con.close()
+    print("[OK] Job posting archive migration completed.")
+
+
+def migrate_ai_screening():
+    """Add AI-screening fields to Job_Application:
+
+    - screening_status ('Scored' / 'Manual Review Required')
+    - matched_evidence, missing_requirements (JSON text)
+    - scored_at, scorer_version
+    - shortlist_override_by / shortlist_override_reason / shortlist_override_at
+
+    Additive-only migration (ALTER ADD COLUMN): no table rebuild and no
+    backup required. Backfills screening_status from ai_score presence
+    (rows never scored become 'Manual Review Required').
+    Idempotent - safe to re-run.
+    """
+    con = get_connection()
+    cols = [r[1] for r in con.execute("PRAGMA table_info(Job_Application)")]
+    if 'screening_status' in cols:
+        con.close()
+        print("[OK] AI screening migration already applied.")
+        return
+
+    print("[MIGRATION] Adding AI screening fields to Job_Application ...")
+    con.execute("ALTER TABLE Job_Application ADD COLUMN screening_status TEXT DEFAULT 'Scored'")
+    con.execute("ALTER TABLE Job_Application ADD COLUMN matched_evidence TEXT")
+    con.execute("ALTER TABLE Job_Application ADD COLUMN missing_requirements TEXT")
+    con.execute("ALTER TABLE Job_Application ADD COLUMN scored_at TEXT")
+    con.execute("ALTER TABLE Job_Application ADD COLUMN scorer_version TEXT")
+    con.execute("ALTER TABLE Job_Application ADD COLUMN shortlist_override_by INTEGER "
+                "REFERENCES Employee(employee_id)")
+    con.execute("ALTER TABLE Job_Application ADD COLUMN shortlist_override_reason TEXT")
+    con.execute("ALTER TABLE Job_Application ADD COLUMN shortlist_override_at TEXT")
+    con.execute("UPDATE Job_Application SET screening_status='Manual Review Required' "
+                "WHERE ai_score IS NULL")
+    con.commit()
+    con.close()
+    print("[OK] AI screening migration completed.")
+
+
+def migrate_interview_format():
+    """Add interview format/venue tracking and reschedule history:
+
+    - Interview: format ('Physical'/'Virtual'), venue (snapshot of the
+      posting branch address for Physical interviews), posting_branch_id
+      (branch the venue was derived from)
+    - Interview_Reschedule: history of reschedules (old/new datetime, reason,
+      acting user)
+
+    Additive-only migration (ALTER ADD COLUMN + CREATE TABLE): no table
+    rebuild and no backup required. Legacy interviews keep their existing
+    type/location; format is left NULL.
+    Idempotent - safe to re-run.
+    """
+    con = get_connection()
+    cols = [r[1] for r in con.execute("PRAGMA table_info(Interview)")]
+    if 'format' in cols:
+        con.close()
+        print("[OK] Interview format migration already applied.")
+        return
+
+    print("[MIGRATION] Adding interview format fields and reschedule history ...")
+    con.execute("ALTER TABLE Interview ADD COLUMN format TEXT")
+    con.execute("ALTER TABLE Interview ADD COLUMN venue TEXT")
+    con.execute("ALTER TABLE Interview ADD COLUMN posting_branch_id INTEGER")
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS Interview_Reschedule (
+            reschedule_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            interview_id     INTEGER NOT NULL REFERENCES Interview(interview_id),
+            old_scheduled_at TEXT NOT NULL,
+            new_scheduled_at TEXT NOT NULL,
+            reason           TEXT NOT NULL,
+            rescheduled_by   INTEGER REFERENCES Employee(employee_id),
+            created_at       TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    con.commit()
+    con.close()
+    print("[OK] Interview format migration completed.")
+
+
+def migrate_reschedule_dedup():
+    """Create the persistent reschedule-email dedup table.
+
+    Reschedule-request Message-IDs are stored here so the email monitor never
+    re-notifies for the same message, even across server restarts within the
+    scan window. Additive-only (CREATE TABLE IF NOT EXISTS): no rebuild and
+    no backup required. Idempotent - safe to re-run.
+    """
+    con = get_connection()
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS Reschedule_Email_Processed (
+            msg_id       TEXT PRIMARY KEY,
+            processed_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    con.commit()
+    con.close()
+    print("[OK] Reschedule dedup table migration completed.")
+
+
+def migrate_scorecard_recommendation():
+    """Create the fixed interview scorecard and candidate recommendation tables.
+
+    - Interview_Scorecard: exactly three 1-5 criteria (technical,
+      communication, fit), each with a mandatory evidence note; one per
+      interview (UPSERT on interview_id).
+    - Candidate_Recommendation: HR/Admin recommendation with an approval
+      workflow (Pending/Approved/Rejected); one record per application per
+      posting.
+
+    Additive-only (CREATE TABLE IF NOT EXISTS): no rebuild, no backup.
+    Idempotent - safe to re-run.
+    """
+    con = get_connection()
+    exists = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='Interview_Scorecard'"
+    ).fetchone()
+    if exists:
+        con.close()
+        print("[OK] Scorecard/recommendation migration already applied.")
+        return
+
+    print("[MIGRATION] Creating scorecard and recommendation tables ...")
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS Interview_Scorecard (
+            scorecard_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            interview_id       INTEGER NOT NULL UNIQUE
+                               REFERENCES Interview(interview_id) ON DELETE CASCADE,
+            technical          INTEGER NOT NULL CHECK(technical BETWEEN 1 AND 5),
+            communication      INTEGER NOT NULL CHECK(communication BETWEEN 1 AND 5),
+            fit                INTEGER NOT NULL CHECK(fit BETWEEN 1 AND 5),
+            note_technical     TEXT NOT NULL,
+            note_communication TEXT NOT NULL,
+            note_fit           TEXT NOT NULL,
+            scored_by          INTEGER REFERENCES Employee(employee_id),
+            created_at         TEXT DEFAULT (datetime('now')),
+            updated_at         TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS Candidate_Recommendation (
+            recommendation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            posting_id        INTEGER NOT NULL REFERENCES Job_Posting(posting_id) ON DELETE CASCADE,
+            application_id    INTEGER NOT NULL REFERENCES Job_Application(application_id) ON DELETE CASCADE,
+            recommended_by    INTEGER REFERENCES Employee(employee_id),
+            status            TEXT NOT NULL DEFAULT 'Pending'
+                              CHECK(status IN ('Pending','Approved','Rejected')),
+            approved_by       INTEGER REFERENCES Employee(employee_id),
+            approved_at       TEXT,
+            rejection_reason  TEXT,
+            created_at        TEXT DEFAULT (datetime('now')),
+            UNIQUE (posting_id, application_id)
+        )
+    """)
+    con.commit()
+    con.close()
+    print("[OK] Scorecard/recommendation migration completed.")
+
+
+def migrate_offer_lifecycle():
+    """Extend offer/application statuses and add offer-lifecycle tables:
+
+    - Contract.status CHECK gains 'Expired'
+    - Job_Application.status CHECK gains 'Offer Expired'
+    - Offer_Approval: HR Manager/Admin approval gate before an offer is sent
+    - Email_Delivery_Log: per-attempt delivery outcome for offers (retryable)
+
+    Both status changes require verified table rebuilds (backup first) via
+    migration_framework; the new DDL is derived from the live table so
+    column parity is guaranteed. Additive tables created afterwards.
+    Idempotent - safe to re-run.
+    """
+    from migration_framework import backup_before_migration, rebuild_table
+
+    con = get_connection()
+    row = con.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='Contract'"
+    ).fetchone()
+    if row and 'Expired' in (row['sql'] or ''):
+        con.close()
+        print("[OK] Offer lifecycle migration already applied.")
+        return
+
+    print("[MIGRATION] Extending offer lifecycle statuses ...")
+    backup_path = backup_before_migration(DB_PATH)
+    print(f"[BACKUP] Created backup at {backup_path}")
+    try:
+        # Rebuild Contract with 'Expired' in the status CHECK.
+        contract_ddl = row['sql']
+        contract_ddl = contract_ddl.replace('CREATE TABLE IF NOT EXISTS', 'CREATE TABLE')
+        contract_ddl = contract_ddl.replace('CREATE TABLE "Contract"', 'CREATE TABLE Contract_new')
+        contract_ddl = contract_ddl.replace(
+            "CHECK(status IN ('Draft','Sent','Signed','Accepted','Declined'))",
+            "CHECK(status IN ('Draft','Sent','Signed','Accepted','Declined','Expired'))")
+        rebuild_table(con, 'Contract', contract_ddl)
+
+        # Rebuild Job_Application with 'Offer Expired' in the status CHECK.
+        ja_row = con.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='Job_Application'"
+        ).fetchone()
+        ja_ddl = ja_row['sql']
+        ja_ddl = ja_ddl.replace('CREATE TABLE IF NOT EXISTS', 'CREATE TABLE')
+        ja_ddl = ja_ddl.replace('CREATE TABLE "Job_Application"', 'CREATE TABLE Job_Application_new')
+        ja_ddl = ja_ddl.replace(
+            "CHECK(status IN ('New','Shortlisted','Interview','Offered','Hired','Rejected'))",
+            "CHECK(status IN ('New','Shortlisted','Interview','Offered','Hired','Rejected','Offer Expired'))")
+        rebuild_table(con, 'Job_Application', ja_ddl)
+
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS Offer_Approval (
+                approval_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                contract_id      INTEGER NOT NULL UNIQUE
+                                 REFERENCES Contract(contract_id) ON DELETE CASCADE,
+                status           TEXT NOT NULL DEFAULT 'Pending'
+                                 CHECK(status IN ('Pending','Approved','Rejected')),
+                requested_by     INTEGER REFERENCES Employee(employee_id),
+                approved_by      INTEGER REFERENCES Employee(employee_id),
+                approved_at      TEXT,
+                rejection_reason TEXT,
+                created_at       TEXT DEFAULT (datetime('now')),
+                updated_at       TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS Email_Delivery_Log (
+                delivery_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+                related_type TEXT NOT NULL,
+                related_id   INTEGER NOT NULL,
+                recipient    TEXT NOT NULL,
+                status       TEXT NOT NULL CHECK(status IN ('Sent','Failed')),
+                attempts     INTEGER NOT NULL DEFAULT 1,
+                last_error   TEXT,
+                created_at   TEXT DEFAULT (datetime('now')),
+                updated_at   TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        con.commit()
+    finally:
+        con.close()
+    print("[OK] Offer lifecycle migration completed.")
+
+
 def init_db():
     os.makedirs('instance', exist_ok=True)
     os.makedirs('uploads', exist_ok=True)
@@ -717,18 +1233,26 @@ def init_db():
     # Run migrations for existing databases
     migrate_add_branch_address_fields()
     migrate_attendance_request_table()
+    migrate_attendance_status()
     migrate_increment_policy_table()
     migrate_scheduler_lock_table()
     migrate_contract_security()
     migrate_department_manager_id()
     migrate_recruitment_audience()
     migrate_position_catalog()
+    migrate_vacancy_openings()
+    migrate_ai_screening()
+    migrate_interview_format()
+    migrate_reschedule_dedup()
+    migrate_scorecard_recommendation()
+    migrate_offer_lifecycle()
+    migrate_job_posting_archive()
     
     con = get_connection()
     cur = con.cursor()
 
     # ── Roles ──────────────────────────────────────────────────────────────
-    roles = [('Admin',), ('HR',), ('Manager',), ('Employee',), ('HR Manager',), ('HR Director',)]
+    roles = [('Admin',), ('HR',), ('Manager',), ('Employee',), ('HR Manager',)]
     cur.executemany("INSERT OR IGNORE INTO Role(role_name) VALUES(?)", roles)
 
     # ── Permissions ────────────────────────────────────────────────────────
@@ -831,6 +1355,12 @@ def init_db():
         for perm in all_perms:
             cur.execute("INSERT OR IGNORE INTO Role_Permission(role_id, permission_id) VALUES(?,?)",
                        (hr_manager_role, perm[0]))
+
+    con.commit()
+    con.close()
+    migrate_hr_director_to_hr_manager()
+    con = get_connection()
+    cur = con.cursor()
 
     # Employee role permissions
     cur.execute("SELECT role_id FROM Role WHERE role_name='Employee'")
@@ -1155,7 +1685,7 @@ def init_db():
     # ── Audit Log seed ─────────────────────────────────────────────────────
     logs = [
         (1,'LOGIN','Auth','Admin logged in','Employee',1,'Success',None,'127.0.0.1'),
-        (2,'LOGIN','Auth','HR Director logged in','Employee',2,'Success',None,'192.168.1.23'),
+        (2,'LOGIN','Auth','HR Manager logged in','Employee',2,'Success',None,'192.168.1.23'),
         (2,'APPROVE','Leave','Approved leave application LV-002','Leave_Application',2,'Success','{"leave_id":2}','192.168.1.23'),
         (4,'APPLY_LEAVE','Leave','Elizabeth applied for Annual Leave','Leave_Application',1,'Success','{"days":3}','192.168.1.34'),
         (5,'LOGIN','Auth','Failed login attempt','Employee',5,'Failed',None,'192.168.1.57'),
@@ -1186,7 +1716,7 @@ def init_db():
     print()
     print("=== DEFAULT LOGIN CREDENTIALS ===")
     print("System Admin : admin@smarthr.my        / Admin@123")
-    print("HR Director  : hr@smarthr.my           / Hr@123")
+    print("HR Manager   : hr@smarthr.my           / Hr@123")
     print("CEO          : brian@smarthr.my        / Manager@123")
     print("COO / CFO    : coo@smarthr.my, cfo@smarthr.my  / Manager@123")
     print("Branch Mgrs  : weiliang@smarthr.my (KL), cheeseng@smarthr.my (PG), kevin_loh@smarthr.my (JB)  / Manager@123")

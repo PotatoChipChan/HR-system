@@ -64,6 +64,7 @@
 <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:13px;color:var(--text-secondary)">
   Policy: <b>{{ '%.1f'|format(policy.increment_pct) }}%</b> for all employees with
   <b>{{ policy.tenure_threshold_years }}</b> year{{ '' if policy.tenure_threshold_years == 1 else 's' }} or more of service.
+  Existing proposals keep the percentage stated in their row.
 </div>
 {% endif %}
 

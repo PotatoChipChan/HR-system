@@ -41,14 +41,18 @@ with app.test_client() as client:
     # ── Feature #10: Applications default to Shortlisted ──
     resp = client.get('/recruitment/applications')
     check(resp.status_code == 200, 'GET /applications defaults to shortlisted (200)')
-    check(b'Shortlisted Candidates' in resp.data, 'Page title: Shortlisted Candidates')
-    check(b'btn-amber' in resp.data,  'Shortlisted tab highlighted (btn-amber)')
+    check(b'>Applications</h1>' in resp.data or b'Applications' in resp.data, 'Page title: Applications')
+    check(b'value="Shortlisted" selected' in resp.data, 'Status dropdown defaults to Shortlisted (selected)')
 
-    for show in ('active', 'rejected', 'hired'):
-        resp = client.get(f'/recruitment/applications?show={show}')
-        check(resp.status_code == 200, f'GET /applications?show={show} (200)')
+    for status in ('New', 'Shortlisted', 'Interview', 'Rejected'):
+        resp = client.get(f'/recruitment/applications?status={status}')
+        check(resp.status_code == 200, f'GET /applications?status={status} (200)')
 
-    check(b'Active' in client.get('/recruitment/applications?show=active').data, 'Active tab present')
+    apps_html = client.get('/recruitment/applications').data
+    check(b'value="New"' in apps_html and b'value="Interview"' in apps_html
+          and b'value="Rejected"' in apps_html and b'value="Shortlisted"' in apps_html,
+          'Status dropdown has New/Shortlisted/Interview/Rejected options')
+    check(b'Active' not in apps_html, 'No "Active" tab/status present')
 
     # ── Feature #10: View posting + Reject button ──
     resp = client.get('/recruitment/postings/1')

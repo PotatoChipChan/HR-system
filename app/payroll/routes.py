@@ -13,15 +13,32 @@ import json
 pay_bp = Blueprint('payroll', __name__, url_prefix='/payroll')
 
 
+def _parse_period(month_raw, year_raw, *, month_required=False):
+    """Validate payroll period fields before they reach integer conversion or SQL."""
+    try:
+        month = int(month_raw) if month_raw not in (None, '') else 0
+        year = int(year_raw) if year_raw not in (None, '') else datetime.date.today().year
+    except (TypeError, ValueError):
+        return None, None
+    if year < 1 or year > 9999 or month < 0 or month > 12 or (month_required and not month):
+        return None, None
+    return month, year
+
+
 @pay_bp.route('/')
 @login_required
 def list_payroll():
     uid  = session['user_id']
     role = session['user_role']
     co   = session['company_id']
-    month_raw = request.args.get('month', '')
-    month = int(month_raw) if month_raw else 0
-    year  = int(request.args.get('year',  datetime.date.today().year))
+    if 'month' in request.args:
+        month, year = _parse_period(request.args.get('month', ''), request.args.get('year', ''))
+    else:
+        # Default the list to the current month; "All Year" is opt-in.
+        month, year = datetime.date.today().month, datetime.date.today().year
+    if month is None:
+        flash('Use a valid payroll month and year filter.', 'danger')
+        month, year = 0, datetime.date.today().year
 
     search_name = request.args.get('name', '').strip()
     search_branch = request.args.get('branch', '').strip()
@@ -31,7 +48,7 @@ def list_payroll():
     branches = []
     departments = []
 
-    if role in ('Admin', 'HR', 'HR Manager', 'HR Director', 'Manager'):
+    if role in ('Admin', 'HR', 'HR Manager', 'Manager'):
         if role == 'Manager':
             branches = query("SELECT branch_id, name FROM Branch WHERE company_id=? AND branch_id=?", (co, session['branch_id']))
             departments = query("SELECT department_id, branch_id, department_name FROM Department WHERE branch_id=?", (session['branch_id'],))
@@ -117,8 +134,10 @@ def list_payroll():
 def generate_payroll():
     uid  = session['user_id']
     co   = session['company_id']
-    month = int(request.form.get('month'))
-    year  = int(request.form.get('year'))
+    month, year = _parse_period(request.form.get('month'), request.form.get('year'), month_required=True)
+    if month is None:
+        flash('Use a valid payroll month and year.', 'danger')
+        return redirect(url_for('payroll.list_payroll'))
 
     # Find employees who already have Finalised or Paid payrolls for this month
     finalised_records = query("""SELECT p.employee_id FROM Payroll p
@@ -127,6 +146,10 @@ def generate_payroll():
                                  AND p.status IN ('Finalised', 'Paid')""",
                               (co, month, year))
     finalised_eids = {r['employee_id'] for r in finalised_records} if finalised_records else set()
+
+    from app.payroll.helpers import increment_landing_map
+    employees = query("SELECT * FROM Employee WHERE company_id=? AND is_active=1", (co,))
+    landing_map = increment_landing_map(co, employees, datetime.date.today())
 
     # Unlink existing Draft invoices
     execute("""UPDATE Invoice SET payroll_id = NULL 
@@ -142,7 +165,6 @@ def generate_payroll():
                AND employee_id IN (SELECT employee_id FROM Employee WHERE company_id=?)""",
             (month, year, co))
 
-    employees = query("SELECT * FROM Employee WHERE company_id=? AND is_active=1", (co,))
     count = 0
 
     for emp in employees:
@@ -152,17 +174,20 @@ def generate_payroll():
         if eid in finalised_eids:
             continue
 
-        # ---- Salary Increment: check for approved increments ----
-        inc = query("""
-            SELECT * FROM Salary_Increment
-            WHERE employee_id=? AND status='Approved'
-            ORDER BY period_year DESC, increment_id DESC
-            LIMIT 1
-        """, (eid,), one=True)
-
-        if inc:
-            effective_salary = inc['new_salary']
-            salary_inc_amt = inc['new_salary'] - inc['old_salary']
+        # ---- Salary Increment: new salary from the landing month; the
+        # increment line shows only on the landing month itself ----
+        land = landing_map.get(eid)
+        if land:
+            inc = land[2]
+            if (year, month) == (land[1], land[0]):
+                effective_salary = inc['new_salary']
+                salary_inc_amt = inc['new_salary'] - inc['old_salary']
+            elif (year, month) > (land[1], land[0]):
+                effective_salary = inc['new_salary']
+                salary_inc_amt = 0.0
+            else:
+                effective_salary = inc['old_salary']
+                salary_inc_amt = 0.0
         else:
             effective_salary = emp['base_salary']
             salary_inc_amt = 0.0
@@ -179,7 +204,7 @@ def generate_payroll():
         ot_hours = att['ot'] or 0
         
         # Get ALL outstanding approved invoice claims for the employee
-        claims = query("""SELECT SUM(total_amount) as total
+        claims = query("""SELECT SUM(COALESCE(total_amount_myr, total_amount)) as total
                           FROM Invoice
                           WHERE employee_id=? AND status='Approved' AND payroll_id IS NULL""",
                        (eid,), one=True)
@@ -300,15 +325,17 @@ def finalise(pid):
 
 
 @pay_bp.route('/bulk-finalise', methods=['POST'])
-@role_required('Admin', 'HR', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR', 'HR Manager')
 def bulk_finalise():
     payroll_ids = request.form.getlist('payroll_ids')
     if not payroll_ids:
         flash('No payroll records selected.', 'warning')
         return redirect(url_for('payroll.list_payroll'))
 
-    month = int(request.form.get('month', 0))
-    year = int(request.form.get('year', 0))
+    month, year = _parse_period(request.form.get('month'), request.form.get('year'), month_required=True)
+    if month is None:
+        flash('Use a valid payroll month and year.', 'danger')
+        return redirect(url_for('payroll.list_payroll'))
 
     success = 0
     for pid_str in payroll_ids:
@@ -344,7 +371,7 @@ def bulk_finalise():
 
 
 @pay_bp.route('/bulk-pdf-selected', methods=['POST'])
-@role_required('Admin', 'HR', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR', 'HR Manager')
 def bulk_pdf_selected():
     import zipfile
     payroll_ids = request.form.getlist('payroll_ids')
@@ -377,11 +404,10 @@ def bulk_pdf_selected():
 @role_required('Admin', 'HR')
 def bulk_download_pdf():
     """Generate a ZIP file containing all payslips for the selected month/year."""
-    month = int(request.args.get('month', 0))
-    year  = int(request.args.get('year', 0))
+    month, year = _parse_period(request.args.get('month'), request.args.get('year'), month_required=True)
     co    = session['company_id']
 
-    if not month or not year:
+    if month is None:
         flash('Invalid month or year for bulk download.', 'danger')
         return redirect(url_for('payroll.list_payroll'))
 

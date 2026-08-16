@@ -6,6 +6,24 @@ from app.increment import increment_bp
 from datetime import datetime
 
 
+def _safe_year(raw):
+    try:
+        year = int(raw) if raw not in (None, '') else datetime.now().year
+    except (TypeError, ValueError):
+        return None
+    return year if 1 <= year <= 9999 else None
+
+
+def _safe_filter_id(raw):
+    if raw in (None, ''):
+        return ''
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return ''
+    return str(value) if value > 0 else ''
+
+
 def get_policy(company_id):
     """Return the increment policy for a company, creating a default if absent."""
     policy = query("SELECT * FROM Increment_Policy WHERE company_id=?",
@@ -25,11 +43,18 @@ def get_policy(company_id):
 @login_required
 @role_required('Admin', 'HR Manager')
 def list_increments():
-    year = int(request.args.get('year') or datetime.now().year)
+    year = _safe_year(request.args.get('year'))
+    if year is None:
+        flash('Invalid year filter ignored.', 'warning')
+        year = datetime.now().year
     grade_f = request.args.get('grade', '')
     status_f = request.args.get('status', '')
-    branch_f = request.args.get('branch_id', '')
-    dept_f = request.args.get('department_id', '')
+    raw_branch_f = request.args.get('branch_id', '')
+    raw_dept_f = request.args.get('department_id', '')
+    branch_f = _safe_filter_id(raw_branch_f)
+    dept_f = _safe_filter_id(raw_dept_f)
+    if (raw_branch_f and not branch_f) or (raw_dept_f and not dept_f):
+        flash('Invalid branch or department filter ignored.', 'warning')
     search = request.args.get('search', '')
 
     co = session['company_id']
@@ -108,6 +133,8 @@ def policy():
             tenure = 0
         if not eff_month or eff_month < 1 or eff_month > 12:
             eff_month = 1
+        if not eff_year or not 1 <= eff_year <= 9999:
+            eff_year = datetime.now().year
 
         execute("""
             UPDATE Increment_Policy
@@ -140,7 +167,11 @@ def policy():
 @role_required('Admin', 'HR Manager')
 def propose_increments():
     co = session['company_id']
-    year = int(request.form.get('year', datetime.now().year))
+    year = _safe_year(request.form.get('year') if request.method == 'POST'
+                      else request.args.get('year'))
+    if year is None:
+        flash('Use a valid proposal year.', 'danger')
+        return redirect(url_for('increment.propose_increments'))
     policy = get_policy(co)
 
     if request.method == 'POST':

@@ -52,6 +52,7 @@
 <div id="tab-history" class="fade-in" style="display:none">
   {% if history %}
   <div class="card">
+    <div class="table-scroll" tabindex="0" aria-label="Leave history table. Scroll horizontally to see all columns.">
     <table class="tbl">
       <thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th>Status</th><th>Reviewed By</th><th>Comment</th><th>File</th></tr></thead>
       <tbody>
@@ -74,6 +75,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </div>
   {% else %}
   <div class="empty-state"><div class="icon">📋</div><p>No history yet</p></div>

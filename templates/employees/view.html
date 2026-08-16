@@ -40,7 +40,8 @@
       <div style="font-family:'Space Grotesk',sans-serif;font-size:20px;font-weight:700">{{ emp.full_name }}</div>
       <div style="color:var(--text-secondary);font-size:13px;margin-top:4px">{{ emp.position or '—' }} · {{ emp.department_name }} · {{ emp.branch_name }}</div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-        {% if emp.employment_status == 'Active' %}<span class="badge badge-green">Active</span>
+        {% if is_on_leave_today %}<span class="badge badge-amber">On Leave Today</span>
+        {% elif emp.employment_status == 'Active' %}<span class="badge badge-green">Active</span>
         {% elif emp.employment_status == 'On Leave' %}<span class="badge badge-amber">On Leave</span>
         {% else %}<span class="badge badge-red">{{ emp.employment_status }}</span>{% endif %}
         <span class="badge badge-blue">{{ emp.employment_type }}</span>
@@ -48,10 +49,10 @@
       </div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] or (session.user_role == 'Manager' and emp.branch_id == session.branch_id) %}
+      {% if session.user_role in ['Admin','HR Manager','HR'] or (session.user_role == 'Manager' and emp.branch_id == session.branch_id) %}
       <button class="btn btn-primary btn-sm" onclick="document.getElementById('editModal').classList.add('show')">Edit</button>
       {% endif %}
-      {% if session.user_role in ['Admin','HR Director','HR Manager','HR'] %}
+      {% if session.user_role in ['Admin','HR Manager','HR'] %}
       <a class="btn btn-sm {% if has_face_registered %}btn-primary{% else %}btn{% endif %}"
          href="{{ url_for('face.register_face_page', emp_id=emp.employee_id) }}">
         {% if has_face_registered %}Re-register Face{% else %}Register Face{% endif %}
@@ -202,7 +203,7 @@
 </div>
 
 <!-- Edit Modal -->
-{% if session.user_role in ['Admin','HR Director','HR Manager','HR'] or (session.user_role == 'Manager' and emp.branch_id == session.branch_id) %}
+{% if session.user_role in ['Admin','HR Manager','HR'] or (session.user_role == 'Manager' and emp.branch_id == session.branch_id) %}
 <div class="modal-backdrop" id="editModal">
   <div class="modal-card">
     <div class="modal-title">

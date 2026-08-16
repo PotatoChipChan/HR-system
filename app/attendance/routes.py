@@ -91,13 +91,26 @@ def _verify_face_for_user(img_np, employee_id):
         return {'matched': False, 'confidence': confidence, 'error': f'Face does not match your registered profile (confidence: {confidence}%). Only your own face can be used for attendance.'}
 
 
-def _today_open_checkin(employee_id):
-    today = datetime.datetime.now().strftime('%Y-%m-%d')
+def _open_checkin_on(employee_id, date_str):
     return query("""
         SELECT * FROM Attendance
         WHERE employee_id=? AND date(check_in)=? AND check_out IS NULL
         ORDER BY check_in DESC LIMIT 1
-    """, (employee_id, today), one=True)
+    """, (employee_id, date_str), one=True)
+
+
+def _today_open_checkin(employee_id):
+    today = datetime.datetime.now().strftime('%Y-%m-%d')
+    return _open_checkin_on(employee_id, today)
+
+
+def _bounded_open_checkin(employee_id):
+    """Most recent open check-in (check_out IS NULL) for today, otherwise
+    yesterday, otherwise None. Local-time based; never older than yesterday."""
+    now = datetime.datetime.now()
+    today = now.strftime('%Y-%m-%d')
+    yesterday = (now - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+    return _open_checkin_on(employee_id, today) or _open_checkin_on(employee_id, yesterday)
 
 
 def _increment_checkin_failures():
@@ -161,7 +174,7 @@ def time_tracking():
             GROUP BY e.employee_id
             ORDER BY e.full_name
         """, (co, bid))
-    elif role in ('Admin', 'HR Director', 'HR Manager', 'HR'):
+    elif role in ('Admin', 'HR Manager', 'HR'):
         employees = query("""
             SELECT e.full_name, e.position, d.department_name,
                    SUM(CASE WHEN date(a.check_in)=date('now') THEN 1 ELSE 0 END) as present_today,
@@ -195,22 +208,63 @@ def manual():
     co = session['company_id']
     uid = session['user_id']
     branches  = query("SELECT * FROM Branch WHERE company_id=?", (co,))
+    employees = query("""
+        SELECT e.employee_id, e.full_name, e.branch_id, e.department_id,
+               b.name as branch_name, d.department_name
+        FROM Employee e
+        JOIN Branch b ON e.branch_id=b.branch_id
+        JOIN Department d ON e.department_id=d.department_id
+        WHERE e.company_id=? AND e.is_active=1
+        ORDER BY e.full_name
+    """, (co,))
+    departments = query("""
+        SELECT d.*, b.name AS branch_name
+        FROM Department d JOIN Branch b ON d.branch_id=b.branch_id
+        WHERE b.company_id=?
+        ORDER BY d.department_name
+    """, (co,))
 
     if request.method == 'POST':
         f         = request.form
-        emp_id    = uid
         att_date  = f['att_date']
         att_time  = f['att_time']
         att_type  = f['att_type']
         reason    = f.get('reason', '').strip()
-        branch_id = int(f.get('branch_id', session['branch_id']))
+
+        # Target employee: must be an active employee of this company.
+        # Never default silently to the acting user when an employee id is
+        # expected — HR records attendance FOR the selected employee.
+        try:
+            emp_id = int(f.get('employee_id') or uid)
+        except (TypeError, ValueError):
+            emp_id = None
+        emp_row = None
+        if emp_id:
+            emp_row = query("""
+                SELECT e.employee_id, e.branch_id FROM Employee e
+                WHERE e.employee_id=? AND e.company_id=? AND e.is_active=1
+            """, (emp_id, co), one=True)
+        if not emp_row:
+            flash('Select a valid active employee of your company.', 'danger')
+            return redirect(url_for('attendance.manual'))
+        emp_id = emp_row['employee_id']
+
+        # Branch context: must belong to the target employee's branch.
+        form_branch = f.get('branch_id', '').strip()
+        try:
+            branch_id = int(form_branch) if form_branch else emp_row['branch_id']
+        except (TypeError, ValueError):
+            branch_id = emp_row['branch_id']
+        if branch_id != emp_row['branch_id']:
+            flash("The selected branch does not match the employee's branch.", 'danger')
+            return redirect(url_for('attendance.manual'))
 
         if not reason:
             flash('Override reason is mandatory. Please select a reason.', 'danger')
             return redirect(url_for('attendance.manual'))
 
-        if att_type == 'Check In' and _today_open_checkin(emp_id):
-            flash('You already have an open check-in today. Check out first or use a different date.', 'danger')
+        if att_type == 'Check In' and _open_checkin_on(emp_id, att_date):
+            flash(f'Employee already has an open check-in on {att_date}. Check out first or use a different date.', 'danger')
             return redirect(url_for('attendance.manual'))
 
         dt_str = f"{att_date} {att_time}:00"
@@ -274,7 +328,8 @@ def manual():
 
     open_checkin = _today_open_checkin(uid)
     return render_template('attendance/manual.html',
-                           branches=branches, recent=recent,
+                           branches=branches, employees=employees, departments=departments, recent=recent,
+                           today=datetime.date.today().isoformat(),
                            is_checked_in=open_checkin is not None,
                            failed_attempts=session.get('biometric_checkin_failures', 0))
 
@@ -289,7 +344,7 @@ def biometric():
     face_registered = query("SELECT encoding_id FROM Face_Encoding WHERE employee_id=?", (uid,), one=True)
     open_att = _today_open_checkin(uid)
 
-    if role in ('Admin', 'HR Director', 'HR Manager', 'HR'):
+    if role in ('Admin', 'HR Manager', 'HR'):
         employees = query("SELECT employee_id, full_name FROM Employee WHERE company_id=? AND is_active=1 ORDER BY full_name", (session['company_id'],))
         branches = query("SELECT branch_id, name FROM Branch WHERE company_id=? ORDER BY name", (session['company_id'],))
     else:
@@ -318,7 +373,7 @@ def checkin_status():
 @att_bp.route('/register_face', methods=['POST'])
 @login_required
 def register_face():
-    if session.get('user_role') not in ('Admin', 'HR Director', 'HR Manager', 'HR'):
+    if session.get('user_role') not in ('Admin', 'HR Manager', 'HR'):
         return jsonify({'error': 'Only Admin or HR can register faces.'}), 403
 
     data = request.get_json()
@@ -534,7 +589,10 @@ def manual_self():
     reason = data.get('reason', 'Biometric failed (3 attempts)').strip()
     att_time = data.get('time')
 
-    if session.get('user_role') in ('Admin', 'HR Director', 'HR Manager', 'HR', 'Manager'):
+    if action not in ('check_in', 'check_out'):
+        return jsonify({'error': 'Invalid action.'}), 400
+
+    if session.get('user_role') in ('Admin', 'HR Manager', 'HR', 'Manager'):
         return jsonify({'error': 'Manual self-entry is for employees only. Use Manual Attendance page instead.'}), 403
 
     if not reason:
@@ -552,11 +610,13 @@ def manual_self():
             return jsonify({'error': 'Invalid time format. Use HH:MM'}), 400
 
     if action == 'check_out':
-        open_att = _today_open_checkin(uid)
+        open_att = _bounded_open_checkin(uid)
         if not open_att:
-            return jsonify({'error': 'No open check-in found for today.'}), 400
+            return jsonify({'error': 'No open check-in found for today or yesterday.'}), 400
         ci = datetime.datetime.fromisoformat(open_att['check_in'])
         co_dt = now
+        if co_dt <= ci:
+            return jsonify({'error': 'Check-out time must be after the check-in time.'}), 400
         diff_h = round((co_dt - ci).total_seconds() / 3600, 2)
         emp_sched = query("SELECT work_start_time, work_end_time FROM Employee WHERE employee_id=?", (uid,), one=True)
         s_start = emp_sched['work_start_time'] or '09:00'
@@ -581,8 +641,8 @@ def manual_self():
             'message': f'Manual check-out recorded at {co_str[11:16]} (pending approval). Hours: {diff_h}h.',
         })
     else:
-        if _today_open_checkin(uid):
-            return jsonify({'error': 'You are already checked in today.'}), 400
+        if _bounded_open_checkin(uid):
+            return jsonify({'error': 'You already have an open check-in — submit a check-out instead.'}), 400
         dt_str = now.strftime('%Y-%m-%d %H:%M:%S')
         aid = execute("""
             INSERT INTO Attendance
@@ -601,7 +661,7 @@ def manual_self():
 
 
 @att_bp.route('/manual-pending', methods=['GET', 'POST'])
-@role_required('Admin', 'HR', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR', 'HR Manager')
 def manual_pending_review():
     """HR reviews pending self-service manual attendance entries (from biometric failure)."""
     uid = session['user_id']
@@ -664,7 +724,7 @@ def manual_pending_review():
 
 
 @att_bp.route('/manual-pending-count')
-@role_required('Admin', 'HR', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR', 'HR Manager')
 def manual_pending_count():
     """Return count of pending manual entries (for nav badge)."""
     co = session['company_id']
@@ -686,33 +746,26 @@ def attendance_logs():
 
     date_from = request.args.get('from', datetime.date.today().replace(day=1).isoformat())
     date_to = request.args.get('to', datetime.date.today().isoformat())
-    emp_filter = request.args.get('employee', '')
+    search_q = request.args.get('q', '').strip()
     method = request.args.get('method', '')
     branch_filter = request.args.get('branch', '')
     export_csv = request.args.get('export', '')
 
-    if role in ('Admin', 'HR Director', 'HR Manager', 'HR'):
-        if branch_filter:
-            employees = query("SELECT employee_id, full_name FROM Employee WHERE company_id=? AND branch_id=? AND is_active=1 ORDER BY full_name", (co, branch_filter))
-        else:
-            employees = query("SELECT employee_id, full_name FROM Employee WHERE company_id=? AND is_active=1 ORDER BY full_name", (co,))
+    if role in ('Admin', 'HR Manager', 'HR'):
         branches = query("SELECT branch_id, name FROM Branch WHERE company_id=? ORDER BY name", (co,))
     elif role == 'Manager':
         bid = session.get('branch_id')
-        employees = query("SELECT employee_id, full_name FROM Employee WHERE company_id=? AND branch_id=? AND is_active=1 ORDER BY full_name", (co, bid))
         branches = query("SELECT branch_id, name FROM Branch WHERE company_id=? AND branch_id=? ORDER BY name", (co, bid))
         # Managers may only view their own branch's logs – ignore any cross-branch filter
         if branch_filter and branch_filter != str(bid):
             branch_filter = ''
-        if emp_filter:
-            own_emp = query("SELECT 1 FROM Employee WHERE employee_id=? AND company_id=? AND branch_id=?",
-                            (emp_filter, co, bid), one=True)
-            if not own_emp:
-                emp_filter = ''
         branch_filter = str(bid) if bid else ''
     else:
-        employees = []
+        # Employee role: own records only; never honour supplied filters
+        # (an employee-supplied employee/branch filter would be an IDOR leak).
         branches = []
+        search_q = ''
+        branch_filter = ''
 
     sql = """
         SELECT a.*, e.full_name, d.department_name, b.name as branch_name,
@@ -726,12 +779,16 @@ def attendance_logs():
     """
     args = [co, date_from, date_to]
 
+    if role == 'Employee':
+        sql += " AND a.employee_id=?"
+        args.append(uid)
+
     if branch_filter:
         sql += " AND e.branch_id=?"
         args.append(branch_filter)
-    if emp_filter:
-        sql += " AND a.employee_id=?"
-        args.append(emp_filter)
+    if search_q:
+        sql += " AND e.full_name LIKE ?"
+        args.append(f'%{search_q}%')
     if method == 'manual':
         sql += " AND a.is_manual_entry=1"
     elif method == 'biometric':
@@ -761,51 +818,39 @@ def attendance_logs():
         out.headers['Content-type'] = 'text/csv'
         return out
 
-    if role in ('Admin', 'HR Director', 'HR Manager', 'HR'):
-        if branch_filter:
-            stats = query("""
-                SELECT COUNT(*) as total_records,
-                       SUM(CASE WHEN a.is_manual_entry=0 THEN 1 ELSE 0 END) as biometric_count,
-                       SUM(CASE WHEN a.is_manual_entry=1 THEN 1 ELSE 0 END) as manual_count,
-                       ROUND(AVG(a.confidence_score), 1) as avg_confidence,
-                       ROUND(SUM(a.hours_worked), 1) as total_hours
-                FROM Attendance a
-                JOIN Employee e ON a.employee_id=e.employee_id
-                WHERE e.company_id=? AND e.branch_id=?
-                  AND date(a.check_in) >= ? AND date(a.check_in) <= ?
-            """, (co, branch_filter, date_from, date_to), one=True)
-        elif emp_filter:
-            stats = query("""
-                SELECT COUNT(*) as total_records,
-                       SUM(CASE WHEN a.is_manual_entry=0 THEN 1 ELSE 0 END) as biometric_count,
-                       SUM(CASE WHEN a.is_manual_entry=1 THEN 1 ELSE 0 END) as manual_count,
-                       ROUND(AVG(a.confidence_score), 1) as avg_confidence,
-                       ROUND(SUM(a.hours_worked), 1) as total_hours
-                FROM Attendance a
-                JOIN Employee e ON a.employee_id=e.employee_id
-                WHERE e.company_id=? AND a.employee_id=?
-                  AND date(a.check_in) >= ? AND date(a.check_in) <= ?
-            """, (co, emp_filter, date_from, date_to), one=True)
-        else:
-            stats = query("""
-                SELECT COUNT(*) as total_records,
-                       SUM(CASE WHEN a.is_manual_entry=0 THEN 1 ELSE 0 END) as biometric_count,
-                       SUM(CASE WHEN a.is_manual_entry=1 THEN 1 ELSE 0 END) as manual_count,
-                       ROUND(AVG(a.confidence_score), 1) as avg_confidence,
-                       ROUND(SUM(a.hours_worked), 1) as total_hours
-                FROM Attendance a
-                JOIN Employee e ON a.employee_id=e.employee_id
-                WHERE e.company_id=?
-                  AND date(a.check_in) >= ? AND date(a.check_in) <= ?
-            """, (co, date_from, date_to), one=True)
-    else:
-        stats = None
+    # The summary cards must describe the same scoped, filtered result set as
+    # the table.  Previously they were omitted for Managers/Employees and
+    # ignored the selected attendance method for HR users, which could show
+    # "0" (or a different total) above visible records.
+    stats_sql = """
+        SELECT COUNT(*) as total_records,
+               SUM(CASE WHEN a.is_manual_entry=0 THEN 1 ELSE 0 END) as biometric_count,
+               SUM(CASE WHEN a.is_manual_entry=1 THEN 1 ELSE 0 END) as manual_count,
+               ROUND(AVG(a.confidence_score), 1) as avg_confidence,
+               ROUND(SUM(a.hours_worked), 1) as total_hours
+        FROM Attendance a
+        JOIN Employee e ON a.employee_id=e.employee_id
+        WHERE e.company_id=?
+          AND date(a.check_in) >= ? AND date(a.check_in) <= ?
+    """
+    stats_args = [co, date_from, date_to]
+    if role == 'Employee':
+        stats_sql += " AND a.employee_id=?"
+        stats_args.append(uid)
+    if branch_filter:
+        stats_sql += " AND e.branch_id=? AND a.branch_id=?"
+        stats_args.extend([branch_filter, branch_filter])
+    if search_q:
+        stats_sql += " AND e.full_name LIKE ?"
+        stats_args.append(f'%{search_q}%')
+    if method == 'manual':
+        stats_sql += " AND a.is_manual_entry=1"
+    elif method == 'biometric':
+        stats_sql += " AND a.is_manual_entry=0"
+    stats = query(stats_sql, stats_args, one=True)
 
     return render_template('attendance/logs.html',
-                           records=records, employees=employees, branches=branches,
+                           records=records, branches=branches,
                            date_from=date_from, date_to=date_to,
-                           selected_employee=emp_filter, selected_method=method,
+                           search_q=search_q, selected_method=method,
                            selected_branch=branch_filter, stats=stats)
-
-
-

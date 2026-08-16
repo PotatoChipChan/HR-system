@@ -1,44 +1,144 @@
-{% extends "base.html" %}
-{% block title %}Accept Offer{% endblock %}
-{% block page_title %}Accept Offer{% endblock %}
-{% block content %}
-<div class="card fade-in" style="max-width:640px;margin:0 auto">
-  <h2 style="margin-bottom:8px">Offer for {{ contract.position }}</h2>
-  <p style="color:#777;font-size:14px;margin-bottom:24px">
-    Dear {{ contract.applicant_name }}, please review the offer details below and confirm your decision.
-  </p>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Accept Offer | SmartHR</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary: #1a6b3a;
+      --primary-dark: #145a2f;
+      --text: #1a1a2e;
+      --text-secondary: #555;
+      --muted: #888;
+      --bg: #f8f9fa;
+      --card-bg: #ffffff;
+      --border: #e0e0e0;
+      --danger: #a32d2d;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .site-header {
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    }
+    .header-inner {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header-logo {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--primary);
+      text-decoration: none;
+    }
+    .header-tagline { color: var(--text-secondary); font-size: 14px; }
+    .page {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 16px 48px;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      padding: 28px;
+    }
+    .card h2 { margin-bottom: 8px; font-size: 22px; }
+    .card .lead { color: var(--text-secondary); font-size: 14px; margin-bottom: 24px; }
+    .offer-box {
+      background: #f0faf3;
+      padding: 16px 20px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      font-size: 14px;
+      line-height: 1.9;
+    }
+    .label { font-weight: 600; font-size: 14px; display: block; margin-bottom: 6px; }
+    .file-input { margin: 8px 0 16px; font-size: 14px; width: 100%; }
+    .btn {
+      display: block;
+      width: 100%;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+    }
+    .btn-accept { background: var(--primary); color: #fff; }
+    .btn-accept:hover { background: var(--primary-dark); }
+    .btn-decline {
+      background: transparent;
+      color: var(--danger);
+      border: 1px solid #e5b9b9;
+      margin-top: 4px;
+    }
+    .btn-decline:hover { background: #fcebeb; }
+    .form-sep { margin-bottom: 12px; }
+    .note { font-size: 12px; color: var(--muted); margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <span class="header-logo">SmartHR</span>
+      <span class="header-tagline">Offer Acceptance</span>
+    </div>
+  </header>
 
-  <div style="background:#f0faf3;padding:16px 20px;border-radius:8px;margin-bottom:24px;font-size:14px;line-height:1.8">
-    <strong>Offer Details</strong><br>
-    Position: {{ contract.position }}<br>
-    Start Date: {{ contract.start_date }}<br>
-    Salary: RM {{ '{:,.2f}'.format(contract.base_salary or 0) }}<br>
-    Employment Type: {{ contract.employment_type }}<br>
-    Offer Date: {{ contract.offer_date or '-' }}<br>
-    Expires: {{ expires_display or 'N/A' }}
-  </div>
+  <main class="page">
+    <div class="card">
+      <h2>Offer for {{ contract.position }}</h2>
+      <p class="lead">Dear {{ contract.applicant_name }}, please review the offer details below and confirm your decision.</p>
 
-  <form method="POST" enctype="multipart/form-data" style="margin-bottom:12px">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="token" value="{{ token }}">
-    <label style="font-weight:600;font-size:14px">Signed contract (PDF, optional)</label>
-    <input type="file" name="signed_doc" accept=".pdf,.jpg,.png" class="form-control" style="margin:8px 0 16px">
-    <button type="submit" class="btn btn-success" style="width:100%">✅ Accept Offer</button>
-  </form>
+      <div class="offer-box">
+        <strong>Offer Details</strong><br>
+        Position: {{ contract.position }}<br>
+        Start Date: {{ contract.start_date }}<br>
+        Salary: RM {{ '{:,.2f}'.format(contract.base_salary or 0) }}<br>
+        Employment Type: {{ contract.employment_type }}<br>
+        Offer Date: {{ contract.offer_date or '-' }}<br>
+        Expires: {{ expires_display or 'N/A' }}
+      </div>
 
-  <form method="POST" style="margin-bottom:12px">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="token" value="{{ token }}">
-    <input type="hidden" name="action" value="decline">
-    <button type="submit" class="btn btn-outline-danger" style="width:100%"
-            onclick="return confirm('Are you sure you want to decline this offer?');">
-      Decline Offer
-    </button>
-  </form>
+      <form method="POST" enctype="multipart/form-data" class="form-sep">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="token" value="{{ token }}">
+        <label class="label" for="signed-doc">Signed contract (PDF, optional)</label>
+        <input type="file" id="signed-doc" name="signed_doc" accept=".pdf,.jpg,.png" class="file-input">
+        <button type="submit" class="btn btn-accept">✅ Accept Offer</button>
+      </form>
 
-  <p style="font-size:12px;color:#999;margin-top:8px">
-    This secure link is unique to you and expires on {{ expires_display or 'the listed date' }}.
-    If it has expired, contact HR for a new link.
-  </p>
-</div>
-{% endblock %}
+      <form method="POST" class="form-sep">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="token" value="{{ token }}">
+        <input type="hidden" name="action" value="decline">
+        <button type="submit" class="btn btn-decline"
+                onclick="return confirm('Are you sure you want to decline this offer?');">
+          Decline Offer
+        </button>
+      </form>
+
+      <p class="note">
+        This secure link is unique to you and expires on {{ expires_display or 'the listed date' }}.
+        If it has expired, contact HR for a new link.
+      </p>
+    </div>
+  </main>
+</body>
+</html>

@@ -42,19 +42,13 @@
 </div>
 {% endif %}
 
-{% if session['user_role'] in ('Admin','HR','HR Manager','HR Director') and req.status == 'Pending' %}
+{% if session['user_role'] in ('Admin','HR','HR Manager') and req.status == 'Pending' %}
 <div class="card fade-in" style="margin-bottom:20px">
   <div class="sec-title">Review Request</div>
 
   <form method="POST" action="{{ url_for('recruitment.approve_vacancy', rid=req.request_id) }}" style="margin-bottom:20px">
     <h4 style="color:#1a6b3a">Approve</h4>
-    <div class="form-row">
-      <div class="form-group mb-0"><label class="label">Branch for this position *</label>
-        <select class="form-input" name="branch_id" id="branch_select" required>
-          <option value="">Select branch</option>
-        </select>
-      </div>
-    </div>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">The posting will use the branch of {{ req.department_name }} automatically.</p>
     {% if req.is_custom %}
     <div class="form-group" style="margin-bottom:12px">
       <label style="font-size:13px;color:#333;font-weight:500">
@@ -75,26 +69,4 @@
 </div>
 {% endif %}
 
-{% endblock %}
-
-{% block scripts %}
-{% if session['user_role'] in ('Admin','HR','HR Manager','HR Director') and req.status == 'Pending' %}
-<script>
-  // Load branch when department is known
-  document.addEventListener('DOMContentLoaded', function() {
-    var deptId = {{ req.department_id }};
-    fetch('/recruitment/_branches-for-dept/' + deptId)
-      .then(function(r) { return r.json(); })
-      .then(function(branches) {
-        var sel = document.getElementById('branch_select');
-        branches.forEach(function(b) {
-          var opt = document.createElement('option');
-          opt.value = b.branch_id;
-          opt.textContent = b.name;
-          sel.appendChild(opt);
-        });
-      });
-  });
-</script>
-{% endif %}
 {% endblock %}

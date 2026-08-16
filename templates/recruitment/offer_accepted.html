@@ -1,19 +1,97 @@
-{% extends "base.html" %}
-{% block title %}{{ 'Offer Declined' if declined else 'Offer Accepted' }}{% endblock %}
-{% block page_title %}{{ 'Offer Declined' if declined else 'Offer Accepted' }}{% endblock %}
-{% block content %}
-<div class="card fade-in" style="text-align:center;padding:40px">
-  {% if declined %}
-  <div style="font-size:48px;margin-bottom:16px">😔</div>
-  <h2>Offer Declined</h2>
-  <p style="font-size:16px;color:#555;margin:16px 0"><strong>{{ applicant_name }}</strong>, you have declined the offer for <strong>{{ job_title }}</strong>.</p>
-  <p style="font-size:14px;color:#777">Our HR team has been notified. You can close this page.</p>
-  {% else %}
-  <div style="font-size:48px;margin-bottom:16px">🎉</div>
-  <h2>Congratulations, {{ applicant_name }}!</h2>
-  <p style="font-size:16px;color:#555;margin:16px 0">You have accepted the offer for <strong>{{ job_title }}</strong>.</p>
-  <p style="font-size:14px;color:#777">Our HR team will contact you shortly to complete the onboarding process.</p>
-  <p style="font-size:13px;color:#999;margin-top:24px">You can now close this page.</p>
-  {% endif %}
-</div>
-{% endblock %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ 'Offer Declined' if declined else 'Offer Accepted' }} | SmartHR</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary: #1a6b3a;
+      --primary-dark: #145a2f;
+      --text: #1a1a2e;
+      --text-secondary: #555;
+      --muted: #888;
+      --bg: #f8f9fa;
+      --card-bg: #ffffff;
+      --border: #e0e0e0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .site-header {
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    }
+    .header-inner {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header-logo {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--primary);
+      text-decoration: none;
+    }
+    .header-tagline { color: var(--text-secondary); font-size: 14px; }
+    .page {
+      flex: 1;
+      max-width: 720px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 48px 16px;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      padding: 40px 28px;
+      text-align: center;
+    }
+    .emoji { font-size: 48px; margin-bottom: 16px; }
+    .card h2 { margin-bottom: 16px; font-size: 24px; }
+    .card .main-text { font-size: 16px; color: var(--text-secondary); margin-bottom: 8px; }
+    .card .sub-text { font-size: 14px; color: var(--muted); }
+    .sub-text-final { font-size: 13px; color: var(--muted); margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <span class="header-logo">SmartHR</span>
+      <span class="header-tagline">Offer Response</span>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="card">
+      {% if declined %}
+      <div class="emoji">😔</div>
+      <h2>Offer Declined</h2>
+      <p class="main-text"><strong>{{ applicant_name }}</strong>, you have declined the offer for <strong>{{ job_title }}</strong>.</p>
+      <p class="sub-text">Our HR team has been notified. You can close this page.</p>
+      {% else %}
+      <div class="emoji">🎉</div>
+      <h2>Congratulations, {{ applicant_name }}!</h2>
+      <p class="main-text">You have accepted the offer for <strong>{{ job_title }}</strong>.</p>
+      <p class="sub-text">Our HR team will contact you shortly to complete the onboarding process.</p>
+      <p class="sub-text-final">You can now close this page.</p>
+      {% endif %}
+    </div>
+  </main>
+</body>
+</html>

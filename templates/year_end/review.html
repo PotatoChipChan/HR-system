@@ -19,7 +19,7 @@
 {% endblock %}
 
 {% block content %}
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+<div class="year-end-toolbar" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
   <div class="tab-nav">
     <a href="{{ url_for('year_end.review', year=year, tab='increment') }}" class="{{ 'active' if tab=='increment' }}">
       Increments {% if inc_pending %}<span class="tab-badge">{{ inc_pending }}</span>{% endif %}

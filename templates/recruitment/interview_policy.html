@@ -15,7 +15,7 @@
     3. Interviewers on approved/pending leave are automatically excluded for that date.<br>
     4. Candidates are assigned in order of application date (first-come, first-served).<br>
     5. Interviewers are assigned round-robin among eligible Managers/HR staff in the branch.<br>
-    6. Use this on the <a href="{{ url_for('recruitment.list_applications', show='shortlisted') }}">Shortlisted Applications</a> page: select candidates → Auto-Assign.
+    6. Use this on the <a href="{{ url_for('recruitment.list_applications') }}">Shortlisted Applications</a> page: select candidates → Auto-Assign.
   </div>
 
   <form method="POST">
@@ -72,7 +72,7 @@
     </div>
 
     <div style="display:flex;gap:8px;justify-content:flex-end">
-      <a class="btn btn-secondary btn-sm" href="{{ url_for('recruitment.list_applications', show='shortlisted') }}">Back to Applications</a>
+      <a class="btn btn-secondary btn-sm" href="{{ url_for('recruitment.list_applications') }}">Back to Applications</a>
       <button type="submit" class="btn btn-primary btn-sm">Save Policy</button>
     </div>
   </form>

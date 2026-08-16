@@ -14,7 +14,7 @@ def index():
         ORDER BY created_at DESC
         LIMIT 20
     """, (uid,))
-    return jsonify(notifs)
+    return jsonify([dict(notification) for notification in notifs])
 
 @notif_bp.route('/unread-count')
 @login_required
@@ -55,15 +55,26 @@ def mark_all_read():
 def email_config():
     if request.method == 'POST':
         f = request.form
+        try:
+            port = int(f.get('port', ''))
+        except (TypeError, ValueError):
+            flash('Email server port must be a whole number.', 'danger')
+            return redirect(url_for('notifications.email_config'))
+        if not 1 <= port <= 65535:
+            flash('Email server port must be between 1 and 65535.', 'danger')
+            return redirect(url_for('notifications.email_config'))
+        if not f.get('host', '').strip() or not f.get('email', '').strip() or not f.get('username', '').strip():
+            flash('Email host, email address, and username are required.', 'danger')
+            return redirect(url_for('notifications.email_config'))
         cfg = query("SELECT config_id FROM Email_Config WHERE is_active=1 LIMIT 1", one=True)
         if cfg:
             execute("""UPDATE Email_Config SET host=?, port=?, username=?, email=?
                        WHERE config_id=?""",
-                    (f['host'], int(f['port']), f['username'], f['email'], cfg['config_id']))
+                    (f['host'], port, f['username'], f['email'], cfg['config_id']))
         else:
             execute("""INSERT INTO Email_Config (email, provider, host, port, username, is_active)
                        VALUES (?, 'IMAP', ?, ?, ?, 1)""",
-                    (f['email'], f['host'], int(f['port']), f['username']))
+                    (f['email'], f['host'], port, f['username']))
         if f.get('password'):
             import os
             env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')

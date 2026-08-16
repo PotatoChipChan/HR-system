@@ -10,6 +10,14 @@ from datetime import datetime, date
 GRADE_ORDER = ['A', 'B', 'C', 'D']
 
 
+def _safe_year(raw):
+    try:
+        year = int(raw) if raw not in (None, '') else datetime.now().year
+    except (TypeError, ValueError):
+        return None
+    return year if 1 <= year <= 9999 else None
+
+
 # ── helpers ────────────────────────────────────────────────────────────────
 
 def _months_worked_yr(employee_id, year):
@@ -125,10 +133,13 @@ def _auto_generate_bonuses(co, year):
 
 @year_end_bp.route('/year-end-review')
 @login_required
-@role_required('Admin', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR Manager')
 def review():
     co = session['company_id']
-    year = int(request.args.get('year', datetime.now().year))
+    year = _safe_year(request.args.get('year'))
+    if year is None:
+        flash('Invalid year filter ignored.', 'warning')
+        year = datetime.now().year
 
     inc_count = _auto_generate_increments(co, year)
     bonus_count = _auto_generate_bonuses(co, year)
@@ -176,7 +187,7 @@ def review():
 
 @year_end_bp.route('/year-end-review/approve-increment', methods=['POST'])
 @login_required
-@role_required('Admin', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR Manager')
 def approve_increment():
     ids = request.form.getlist('increment_ids')
     year = request.form.get('year', str(datetime.now().year))
@@ -188,6 +199,15 @@ def approve_increment():
         execute("""UPDATE Salary_Increment SET status='Approved', reviewed_by=?, reviewed_at=datetime('now')
                    WHERE increment_id=?""", (uid, iid))
         execute("UPDATE Employee SET base_salary=? WHERE employee_id=?", (inc['new_salary'], inc['employee_id']))
+        # Apply to the Draft payroll where the increment takes effect, the
+        # same as the Salary Increment module's approve flow.
+        try:
+            from app.payroll.helpers import apply_increment_to_payroll
+            inc_amt = inc['new_salary'] - inc['old_salary']
+            apply_increment_to_payroll(inc['employee_id'], inc_amt,
+                                       inc['new_salary'], user_id=uid)
+        except Exception as e:
+            print(f"Failed to apply increment to payroll: {e}")
         try:
             send_notification(inc['employee_id'], 'Salary Increment Approved',
                 f'Your salary has been increased to RM {inc["new_salary"]:,.2f} (+{inc["increment_pct"]}%).', 'Success')
@@ -200,7 +220,7 @@ def approve_increment():
 
 @year_end_bp.route('/year-end-review/reject-increment', methods=['POST'])
 @login_required
-@role_required('Admin', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR Manager')
 def reject_increment():
     ids = request.form.getlist('increment_ids')
     year = request.form.get('year', str(datetime.now().year))
@@ -216,7 +236,7 @@ def reject_increment():
 
 @year_end_bp.route('/year-end-review/approve-bonus', methods=['POST'])
 @login_required
-@role_required('Admin', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR Manager')
 def approve_bonus():
     ids = request.form.getlist('bonus_ids')
     year = request.form.get('year', str(datetime.now().year))
@@ -239,7 +259,7 @@ def approve_bonus():
 
 @year_end_bp.route('/year-end-review/reject-bonus', methods=['POST'])
 @login_required
-@role_required('Admin', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR Manager')
 def reject_bonus():
     ids = request.form.getlist('bonus_ids')
     year = request.form.get('year', str(datetime.now().year))
@@ -257,36 +277,52 @@ def reject_bonus():
 
 @year_end_bp.route('/compensation/policy', methods=['GET', 'POST'])
 @login_required
-@role_required('Admin', 'HR Manager', 'HR Director')
+@role_required('Admin', 'HR Manager')
 def policy():
     co = session['company_id']
-    year = int(request.args.get('year', datetime.now().year))
+    year = _safe_year(request.args.get('year'))
+    if year is None:
+        flash('Invalid year filter ignored.', 'warning')
+        year = datetime.now().year
     inc_policy = _get_inc_policy(co)
     bonus_policy = _get_bonus_policy(co, year)
 
     if request.method == 'POST':
+        try:
+            inc_pct = float(request.form.get('inc_pct', 5.0))
+            inc_tenure = int(request.form.get('inc_tenure', 1))
+            inc_eff_month = int(request.form.get('inc_eff_month', 1))
+            inc_eff_year = int(request.form.get('inc_eff_year', year))
+            grade_months = [
+                float(request.form.get('grade_A_months', 3.0)),
+                float(request.form.get('grade_B_months', 2.0)),
+                float(request.form.get('grade_C_months', 1.0)),
+                float(request.form.get('grade_D_months', 0.5)),
+            ]
+            bonus_tenure = int(request.form.get('bonus_tenure', 3))
+            payout_month = int(request.form.get('payout_month', 1))
+        except (TypeError, ValueError):
+            flash('Enter valid compensation policy values.', 'danger')
+            return redirect(url_for('year_end.policy', year=year))
+        if (not 0 <= inc_pct <= 100 or inc_tenure < 0 or
+                not 1 <= inc_eff_month <= 12 or not 1 <= inc_eff_year <= 9999 or
+                any(value < 0 for value in grade_months) or bonus_tenure < 0 or
+                not 1 <= payout_month <= 12):
+            flash('Compensation policy values are out of range.', 'danger')
+            return redirect(url_for('year_end.policy', year=year))
+
         # Save increment policy
         execute("""UPDATE Increment_Policy SET increment_pct=?, tenure_threshold_years=?, effective_month=?,
                    effective_year=?, auto_propose=?, updated_at=datetime('now') WHERE policy_id=?""",
-                (float(request.form.get('inc_pct', 5.0)),
-                 int(request.form.get('inc_tenure', 1)),
-                 int(request.form.get('inc_eff_month', 1)),
-                 int(request.form.get('inc_eff_year', year)),
-                 1 if request.form.get('inc_auto') else 0,
-                 inc_policy['policy_id']))
+                (inc_pct, inc_tenure, inc_eff_month, inc_eff_year,
+                 1 if request.form.get('inc_auto') else 0, inc_policy['policy_id']))
 
         # Save bonus policy
         execute("""UPDATE Bonus_Policy SET grade_A_months=?, grade_B_months=?, grade_C_months=?, grade_D_months=?,
                    tenure_threshold_months=?, payout_month=?, auto_propose=?, updated_at=datetime('now')
                    WHERE policy_id=?""",
-                (float(request.form.get('grade_A_months', 3.0)),
-                 float(request.form.get('grade_B_months', 2.0)),
-                 float(request.form.get('grade_C_months', 1.0)),
-                 float(request.form.get('grade_D_months', 0.5)),
-                 int(request.form.get('bonus_tenure', 3)),
-                 int(request.form.get('payout_month', 1)),
-                 1 if request.form.get('bonus_auto') else 0,
-                 bonus_policy['policy_id']))
+                (*grade_months, bonus_tenure, payout_month,
+                 1 if request.form.get('bonus_auto') else 0, bonus_policy['policy_id']))
 
         log_audit('UPDATE_COMPENSATION_POLICY', 'YearEnd', f'Updated policies for {year}')
         flash('Compensation policies updated.', 'success')
