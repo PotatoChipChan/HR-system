@@ -260,6 +260,8 @@ smarthr_app/
 > inference): hires for that title default to the **Employee** system role and are
 > automatically assigned as the posting department's manager. If the department already
 > has a different manager, the hire is blocked and HR must reassign the manager first.
+> The Vacancy Request form marks such positions inline and warns when a custom title is
+> chosen instead.
 >
 > **Guided setup:** HR can explicitly continue from a new Branch to its Department, catalog
 > Position, a prefilled Manager employee form, and a prefilled Job Posting form. The normal

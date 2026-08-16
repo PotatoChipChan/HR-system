@@ -5351,6 +5351,80 @@ if _active:
         init_db_mod.DB_PATH = b42_real_db
         shutil.rmtree(b42_tmp_dir, ignore_errors=True)
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# B43 — Vacancy request position guidance (dept-manager flag + custom warning)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+print('=' * 60)
+_focus_block('43')
+print('B43 — Vacancy request position guidance')
+print('=' * 60)
+
+if _active:
+    b43_tmp_dir = tempfile.mkdtemp(prefix='smarthr_b43_')
+    b43_db = os.path.join(b43_tmp_dir, 'smarthr_b43.db')
+    shutil.copy2(_suite_db, b43_db)
+    b43_real_db = app_db_mod.DB_PATH
+    app_db_mod.DB_PATH = b43_db
+    init_db_mod.DB_PATH = b43_db
+    try:
+        with app.test_client() as client:
+            client.get('/login')
+            client.post('/login', data={'email': 'hr@smarthr.my', 'password': 'Hr@123'},
+                        follow_redirects=True)
+
+            b43_flagged = dbq("""SELECT position_id, position_name, department_id
+                                 FROM Position
+                                 WHERE is_department_manager_position=1 AND is_active=1
+                                 ORDER BY position_id LIMIT 1""", one=True)
+            check(b43_flagged is not None, 'B43: suite fixture has a flagged catalog position')
+            resp = client.get(f'/recruitment/_positions-for-dept/{b43_flagged["department_id"]}')
+            b43_data = resp.get_json()
+            b43_flagged_row = [p for p in b43_data if p['position_id'] == b43_flagged['position_id']]
+            check(resp.status_code == 200 and b43_flagged_row
+                  and b43_flagged_row[0]['is_department_manager_position'] == 1,
+                  'B43: positions API exposes the Department Manager flag for flagged positions')
+
+            b43_ord_dept = dbq("""SELECT d.department_id FROM Department d
+                                  JOIN Position p ON p.department_id=d.department_id AND p.is_active=1
+                                  WHERE p.is_department_manager_position=0
+                                  GROUP BY d.department_id ORDER BY d.department_id LIMIT 1""", one=True)
+            resp = client.get(f'/recruitment/_positions-for-dept/{b43_ord_dept["department_id"]}')
+            b43_ord_data = resp.get_json()
+            check(resp.status_code == 200 and b43_ord_data
+                  and all(p.get('is_department_manager_position') == 0 for p in b43_ord_data),
+                  'B43: ordinary positions expose the flag as false')
+
+            resp = client.get('/recruitment/_positions-for-dept/999999')
+            check(resp.get_json() == [], 'B43: positions API returns empty for unknown departments')
+
+            page = client.get('/recruitment/vacancy-request').data.decode('utf-8', errors='replace')
+            check('Department Manager Position' in page
+                  and 'automatically assigned as manager of this department' in page
+                  and 'does not grant branch-wide Manager access' in page,
+                  'B43: vacancy form renders the department-manager info message')
+            check('Custom titles do not create department-manager responsibility' in page
+                  and 'Use an existing catalog position marked Department Manager Position' in page,
+                  'B43: vacancy form renders the custom-title warning')
+            check('id="dept_mgr_hint" style="display:none' in page
+                  and 'id="custom_warn" style="display:none' in page,
+                  'B43: both messages start hidden')
+            check("setAttribute('data-dept-mgr'" in page
+                  and "getAttribute('data-dept-mgr') === '1'" in page,
+                  'B43: catalog options carry and read the data-dept-mgr attribute')
+            check('updatePositionMessages' in page
+                  and 'deptMgrHint.style.display = isFlagged' in page
+                  and 'customWarn.style.display' in page,
+                  'B43: message logic hides both until a valid position is selected')
+            check('toggleCustom();' in page
+                  and "posSel.innerHTML = '<option value=\"\">Select a department first</option>'" in page,
+                  'B43: department change rebuild clears stale messages')
+            client.get('/logout')
+    finally:
+        app_db_mod.DB_PATH = b43_real_db
+        init_db_mod.DB_PATH = b43_real_db
+        shutil.rmtree(b43_tmp_dir, ignore_errors=True)
+
 # Summary
 # ═══════════════════════════════════════════════════════════════════════════════
 

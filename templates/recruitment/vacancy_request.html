@@ -21,6 +21,13 @@
         </select>
         <input class="form-input" name="position_title" id="custom_title" placeholder="e.g. AI Engineer" style="display:none;margin-top:8px">
         <p class="hint" id="custom_hint" style="display:none;color:#888;font-size:12px;margin-top:6px">Custom titles are reviewed by HR before the posting is created.</p>
+        <div id="dept_mgr_hint" style="display:none;margin-top:8px;padding:10px 14px;border:1px solid var(--g300);background:var(--g50);border-radius:12px">
+          <div style="font-size:13px;font-weight:700;color:var(--g700)">Department Manager Position</div>
+          <p style="font-size:12px;color:var(--text-secondary);margin:4px 0 0">The successful hire will keep the Employee system role and be automatically assigned as manager of this department. This does not grant branch-wide Manager access.</p>
+        </div>
+        <div id="custom_warn" style="display:none;margin-top:8px;padding:10px 14px;border:1px solid #f5c6c6;background:#fcebeb;border-radius:12px">
+          <p style="font-size:12px;color:#7c2b2b;margin:0">Custom titles do not create department-manager responsibility. Use an existing catalog position marked Department Manager Position if this hire should manage the department.</p>
+        </div>
       </div>
     </div>
     <div class="form-row">
@@ -92,6 +99,8 @@
   var deptSel = document.getElementById('department_id');
   var customInput = document.getElementById('custom_title');
   var customHint = document.getElementById('custom_hint');
+  var deptMgrHint = document.getElementById('dept_mgr_hint');
+  var customWarn = document.getElementById('custom_warn');
 
   function loadPositions(deptId) {
     posSel.innerHTML = '<option value="">Loading positions…</option>';
@@ -104,6 +113,7 @@
           var opt = document.createElement('option');
           opt.value = p.position_id;
           opt.textContent = p.position_name;
+          opt.setAttribute('data-dept-mgr', p.is_department_manager_position ? '1' : '0');
           posSel.appendChild(opt);
         });
         var customOpt = document.createElement('option');
@@ -119,12 +129,21 @@
       });
   }
 
+  function updatePositionMessages() {
+    var selected = posSel.selectedOptions && posSel.selectedOptions[0];
+    var isFlagged = selected && posSel.value !== '' && posSel.value !== '__custom__'
+                    && selected.getAttribute('data-dept-mgr') === '1';
+    deptMgrHint.style.display = isFlagged ? '' : 'none';
+    customWarn.style.display = (posSel.value === '__custom__') ? '' : 'none';
+  }
+
   function toggleCustom() {
     var isCustom = posSel.value === '__custom__';
     customInput.style.display = isCustom ? '' : 'none';
     customHint.style.display = isCustom ? '' : 'none';
     customInput.required = isCustom;
     posSel.required = !isCustom;
+    updatePositionMessages();
   }
 
   deptSel.addEventListener('change', function() {

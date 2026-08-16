@@ -2759,7 +2759,7 @@ def _positions_for_dept(dept_id):
     if not dept or dept['company_id'] != session.get('company_id'):
         return jsonify([])
     positions = query("""
-        SELECT position_id, position_name FROM Position
+        SELECT position_id, position_name, is_department_manager_position FROM Position
         WHERE department_id=? AND is_active=1
         ORDER BY position_name
     """, (dept_id,))
